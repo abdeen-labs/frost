@@ -30,9 +30,7 @@ set -euo pipefail
 # --- Config -----------------------------------------------------------------
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$REPO_ROOT/dist"
-# Where the appcast's <enclosure url> should point. Overridable so release.sh can
-# aim it at the GitHub Releases asset while standalone runs keep the legacy host.
-DOWNLOAD_URL_PREFIX="${DOWNLOAD_URL_PREFIX:-https://updates.abdeen.dev/frost/}"
+REPO_SLUG="${REPO_SLUG:-Cuzeth/frost}"
 APP_PATH="${APP_PATH:-${1:-$REPO_ROOT/build/export/frost.app}}"
 
 # --- Locate the exported .app ----------------------------------------------
@@ -98,6 +96,13 @@ SHORT_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' 
 BUILD_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST")"
 echo "Packaging Frost $SHORT_VERSION (build $BUILD_VERSION)"
 
+# Where the appcast's <enclosure url> should point. release.sh exports this to
+# aim at the GitHub Releases asset for the tag it is about to create; the
+# default below resolves to the same place, because that is where DMGs actually
+# live (RELEASING.md: only the appcast is served from updates.abdeen.dev). A
+# default pointing at the update host would mint items whose enclosure 404s.
+DOWNLOAD_URL_PREFIX="${DOWNLOAD_URL_PREFIX:-https://github.com/$REPO_SLUG/releases/download/v$SHORT_VERSION/}"
+
 # --- Verify the Keychain signing key matches the app's public key -----------
 # generate_appcast signs with whatever EdDSA key the login Keychain holds. If
 # that key was ever regenerated, it would sign happily — and every existing
@@ -146,6 +151,50 @@ echo "Built DMG: $DMG_PATH"
 # containing only this release's DMG. That keeps stray/aborted files in dist/
 # out of the public appcast.
 cp -p "$DMG_PATH" "$APPCAST_INPUT/"
+
+# Drop any existing item for THIS marketing version before regenerating.
+#
+# generate_appcast deliberately merges into the -o file and keeps items whose
+# archives are absent — that is what preserves the release history other
+# versions need, so we must not regenerate from scratch. But it keys items on
+# CFBundleVersion, while the DMG filename (and therefore the enclosure URL)
+# is keyed on CFBundleShortVersionString. Re-exporting the same marketing
+# version with a bumped build — a re-notarization, a fixed export — therefore
+# appends a SECOND item pointing at the SAME enclosure URL with a different
+# length and edSignature. Only one can match the uploaded asset; the other can
+# never verify, and it still consumes one of the --maximum-versions slots,
+# silently pushing a genuinely older release out of the feed.
+#
+# Pruning by shortVersionString makes re-publishing a version idempotent:
+# generate_appcast re-adds it below from the DMG we just signed, with the
+# correct length and signature. History for every OTHER version is untouched.
+APPCAST_PATH="$DIST_DIR/appcast.xml"
+if [ -f "$APPCAST_PATH" ]; then
+  PRUNED="$(mktemp)"
+  if awk -v ver="$SHORT_VERSION" '
+      /<item>/ { buf = $0 "\n"; in_item = 1; drop = 0; next }
+      in_item {
+        buf = buf $0 "\n"
+        if (index($0, "<sparkle:shortVersionString>" ver "</sparkle:shortVersionString>")) drop = 1
+        if (index($0, "</item>")) {
+          if (!drop) printf "%s", buf; else dropped++
+          in_item = 0; buf = ""
+        }
+        next
+      }
+      { print }
+      END { if (dropped) print "pruned " dropped " stale item(s)" > "/dev/stderr" }
+    ' "$APPCAST_PATH" >"$PRUNED"; then
+    if ! cmp -s "$APPCAST_PATH" "$PRUNED"; then
+      echo "Replacing the existing appcast item(s) for $SHORT_VERSION."
+      # generate_appcast reads and rewrites the -o path, so prune in place there.
+      cp "$PRUNED" "$APPCAST_PATH"
+    fi
+  else
+    echo "warning: could not prune $APPCAST_PATH; leaving it as-is." >&2
+  fi
+  rm -f "$PRUNED"
+fi
 
 # Attach this version's CHANGELOG.md section as release notes. generate_appcast
 # picks up a notes file whose name matches the archive (minus extension), so

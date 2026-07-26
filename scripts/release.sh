@@ -70,6 +70,57 @@ if gh release view "$TAG" --repo "$REPO_SLUG" >/dev/null 2>&1; then
   exit 1
 fi
 
+# --- Provenance: the tag must name the source that is inside the DMG --------
+# `gh release create` creates the tag server-side from the default branch's
+# current HEAD. Nothing else here ties that commit to the .app being shipped,
+# so a release cut after archiving-then-committing would tag source that is not
+# the source in the DMG — and the CHANGELOG compare-links would describe a diff
+# the release does not contain. Assert the three things that make the tag
+# meaningful, then pin it explicitly with --target.
+if ! git -C "$REPO_ROOT" diff --quiet || ! git -C "$REPO_ROOT" diff --cached --quiet; then
+  echo "error: the working tree has uncommitted changes. Commit or stash them" >&2
+  echo "so the tag names exactly the source that was archived." >&2
+  exit 1
+fi
+
+HEAD_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+if ! git -C "$REPO_ROOT" fetch --quiet origin 2>/dev/null; then
+  echo "warning: could not fetch origin; the pushed-state check may be stale." >&2
+fi
+if [ "$HEAD_SHA" != "$(git -C "$REPO_ROOT" rev-parse origin/main)" ]; then
+  echo "error: HEAD is not origin/main. Push (or check out) the reviewed commit" >&2
+  echo "before cutting the release." >&2
+  exit 1
+fi
+
+# Scope to the shipping app target's build configurations: frostTests carries
+# its own MARKETING_VERSION (1.0), so a project-wide grep reads the wrong one.
+# Match MARKETING_VERSION only inside a buildSettings block whose
+# PRODUCT_BUNDLE_IDENTIFIER is the release bundle id.
+PROJECT_VERSION="$(awk '
+  /buildSettings = \{/ { in_block = 1; version = ""; is_app = 0; next }
+  in_block && /MARKETING_VERSION = / {
+    version = $0
+    sub(/.*MARKETING_VERSION = /, "", version); sub(/;.*/, "", version)
+  }
+  in_block && /PRODUCT_BUNDLE_IDENTIFIER = dev\.abdeen\.frost;/ { is_app = 1 }
+  in_block && /^[[:space:]]*\};/ {
+    if (is_app && version != "") print version
+    in_block = 0
+  }
+' "$REPO_ROOT/frost.xcodeproj/project.pbxproj" | sort -u)"
+if [ "$(printf '%s\n' "$PROJECT_VERSION" | wc -l | tr -d ' ')" != "1" ] \
+   || [ -z "$PROJECT_VERSION" ]; then
+  echo "error: could not read a single MARKETING_VERSION for the release target" >&2
+  echo "from project.pbxproj (got: ${PROJECT_VERSION:-none})." >&2
+  exit 1
+fi
+if [ "$PROJECT_VERSION" != "$VERSION" ]; then
+  echo "error: the exported app is $VERSION but project.pbxproj says" >&2
+  echo "MARKETING_VERSION = $PROJECT_VERSION. Re-export from the committed source." >&2
+  exit 1
+fi
+
 # --- 1. DMG + signed appcast pointing at the GitHub asset -------------------
 export DOWNLOAD_URL_PREFIX="https://github.com/$REPO_SLUG/releases/download/$TAG/"
 "$REPO_ROOT/scripts/publish.sh" "$APP_PATH"
@@ -85,12 +136,14 @@ if "$REPO_ROOT/scripts/changelog.sh" "$VERSION" >"$NOTES_FILE" 2>/dev/null; then
   echo "Using CHANGELOG.md notes for $VERSION."
   gh release create "$TAG" "$DMG" \
     --repo "$REPO_SLUG" \
+    --target "$HEAD_SHA" \
     --title "Frost $VERSION" \
     --notes-file "$NOTES_FILE"
 else
   echo "warning: no CHANGELOG.md section for $VERSION; using --generate-notes." >&2
   gh release create "$TAG" "$DMG" \
     --repo "$REPO_SLUG" \
+    --target "$HEAD_SHA" \
     --title "Frost $VERSION" \
     --generate-notes
 fi
@@ -116,9 +169,25 @@ if [ "${DEPLOY:-1}" = "1" ]; then
   if [ -z "$(git -C "$SITE_REPO" status --porcelain -- "$DEST_REL")" ]; then
     echo "Appcast unchanged in the site repo — nothing to deploy."
   else
+    # The commit is pathspec-scoped, but a bare `git push` is not: any other
+    # unpushed local commits in the site checkout would deploy alongside the
+    # appcast (Vercel deploys on push). Assert we are on the deploy branch with
+    # nothing else pending, then push that branch explicitly.
+    SITE_BRANCH="$(git -C "$SITE_REPO" rev-parse --abbrev-ref HEAD)"
+    if [ "$SITE_BRANCH" != "main" ]; then
+      echo "error: $SITE_REPO is on '$SITE_BRANCH', not main. Switch to the" >&2
+      echo "deploy branch before publishing the appcast." >&2
+      exit 1
+    fi
+    if [ -n "$(git -C "$SITE_REPO" log --oneline '@{u}..' 2>/dev/null)" ]; then
+      echo "error: $SITE_REPO has unpushed commits. Pushing now would deploy" >&2
+      echo "them with the appcast. Push or drop them first:" >&2
+      git -C "$SITE_REPO" log --oneline '@{u}..' >&2
+      exit 1
+    fi
     git -C "$SITE_REPO" add -- "$DEST_REL"
     git -C "$SITE_REPO" commit -m "frost: appcast for $VERSION" -- "$DEST_REL"
-    git -C "$SITE_REPO" push
+    git -C "$SITE_REPO" push origin HEAD:main
     echo "Pushed appcast to abdeen.dev — Vercel will deploy it."
   fi
 else

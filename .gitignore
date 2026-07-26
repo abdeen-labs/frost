@@ -78,7 +78,11 @@ sparkle_priv*
 dist/
 *.dmg
 *.zip
-frost.app
+# Both cases: the Xcode product is `frost.app`, the exported/renamed bundle is
+# `Frost.app`. A single-case pattern only appears to cover both on a
+# case-insensitive volume (core.ignorecase=true) — on a case-sensitive clone a
+# routine `git add -A` would commit the signed app bundle.
+[Ff]rost.app/
 
 # Build / archive / notarization byproducts
 build/
