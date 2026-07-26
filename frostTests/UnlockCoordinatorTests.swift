@@ -33,7 +33,13 @@ struct UnlockCoordinatorTests {
             success: false, error: nil, allowsWatch: false) == .failed)
     }
 
-    @Test(arguments: [LAError.userCancel, .systemCancel, .appCancel])
+    // invalidContext and notInteractive are included deliberately: neither is a
+    // rejected fingerprint, and reporting them as .failed told a locked user
+    // "Touch ID didn't match" and sent them back to the sensor.
+    @Test(arguments: [
+        LAError.userCancel, .systemCancel, .appCancel,
+        .invalidContext, .notInteractive,
+    ])
     func cancellationCodesMapToCancelled(code: LAError.Code) {
         #expect(UnlockCoordinator.authenticationResult(
             success: false, error: laError(code), allowsWatch: false) == .cancelled)
@@ -45,9 +51,14 @@ struct UnlockCoordinatorTests {
             success: false, error: laError(code), allowsWatch: false) == .failed)
     }
 
+    // biometryDisconnected / biometryNotPaired / watchNotAvailable are included
+    // deliberately: a Magic Keyboard with Touch ID dropping its Bluetooth link
+    // used to be reported as a rejected fingerprint, telling the user to press a
+    // chord on a keyboard that is no longer connected.
     @Test(arguments: [
         LAError.biometryLockout, .biometryNotAvailable, .biometryNotEnrolled,
-        .passcodeNotSet,
+        .passcodeNotSet, .biometryDisconnected, .biometryNotPaired,
+        .watchNotAvailable,
     ])
     func unavailabilityCodesMapToUnavailable(code: LAError.Code) {
         let result = UnlockCoordinator.authenticationResult(

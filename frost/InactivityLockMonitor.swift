@@ -50,7 +50,12 @@ final class InactivityLockMonitor: InactivityMonitoring {
     /// case `.tapDisabledByUserInput`. Do NOT "simplify" this back to `.null`
     /// (raw value 0): that measures idle time since the last *null* event, which
     /// real input never resets, so auto-lock would misfire.
-    nonisolated private static var anyInputEventType: CGEventType {
+    /// Internal, not private, so the sentinel carrying the "do NOT simplify
+    /// this back to `.null`" warning is covered by a test: making that exact
+    /// mistake measures idle time since the last *null* event, which real input
+    /// never resets, so Frost would auto-lock mid-work at the threshold
+    /// regardless of activity.
+    nonisolated static var anyInputEventType: CGEventType {
         CGEventType(rawValue: ~0)!
     }
 

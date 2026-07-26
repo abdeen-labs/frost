@@ -226,6 +226,79 @@ struct EventTapManagerTests {
         #expect(timeoutMessage != userInputMessage)
     }
 
+    // MARK: - Tap-disabled dispatch (the side effects, not just the decision)
+
+    /// The escalation callback must actually be invoked. Previously only the
+    /// pure decision helper was covered, so deleting the `.reviveFailed`
+    /// dispatch in handle() left the suite green while the user lost the
+    /// escalation to a visible recovery state.
+    @Test func reviveFailureInvokesTheEscalationCallback() async {
+        let manager = EventTapManager(cursor: FakeCursor())
+        var escalated = false
+        var reenabledMessage: String?
+        manager.onTapReviveFailed = { escalated = true }
+        manager.onTapReenabled = { reenabledMessage = $0 }
+
+        manager.apply(.reviveFailed)
+        await Task.yield()
+
+        #expect(escalated)
+        #expect(reenabledMessage == nil)
+    }
+
+    @Test func reenabledInvokesTheNoticeCallbackAndRepins() async {
+        let fake = FakeCursor()
+        let manager = EventTapManager(cursor: fake)
+        var escalated = false
+        var reenabledMessage: String?
+        manager.onTapReviveFailed = { escalated = true }
+        manager.onTapReenabled = { reenabledMessage = $0 }
+
+        manager.apply(.reenabled(message: "restored"))
+        await Task.yield()
+
+        #expect(reenabledMessage == "restored")
+        #expect(escalated == false)
+        // Re-freezing the cursor is part of the recovery, not incidental:
+        // setCursorFrozen(true) decouples mouse from cursor.
+        #expect(fake.associations.last == false)
+    }
+
+    @Test func ignoreDoesNothing() async {
+        let manager = EventTapManager(cursor: FakeCursor())
+        var escalated = false
+        var reenabledMessage: String?
+        manager.onTapReviveFailed = { escalated = true }
+        manager.onTapReenabled = { reenabledMessage = $0 }
+
+        manager.apply(.ignore)
+        await Task.yield()
+
+        #expect(escalated == false)
+        #expect(reenabledMessage == nil)
+    }
+
+    // MARK: - Cursor drift
+
+    /// The positive drift case the suite could not reach before: the decision is
+    /// now a pure function, so inverting the comparison (pointer drifts freely
+    /// under an overlay claiming "Pointer frozen") fails a test.
+    @Test func driftBeyondToleranceIsDetectedAndWithinToleranceIsNot() {
+        let manager = EventTapManager(cursor: FakeCursor())
+        manager.primeLockedCursorPositionForTesting(CGPoint(x: 100, y: 100))
+
+        #expect(manager.hasCursorDrifted(from: CGPoint(x: 400, y: 400)))
+        #expect(manager.hasCursorDrifted(from: CGPoint(x: 100, y: 140)))
+        // Sub-pixel jitter must NOT trigger two synchronous WindowServer calls.
+        #expect(!manager.hasCursorDrifted(from: CGPoint(x: 100, y: 100)))
+        #expect(!manager.hasCursorDrifted(from: CGPoint(x: 100.2, y: 99.8)))
+    }
+
+    @Test func driftIsNeverDetectedWithoutALockedPosition() {
+        let manager = EventTapManager(cursor: FakeCursor())
+        #expect(!manager.hasCursorDrifted(from: CGPoint(x: 999, y: 999)))
+    }
+
     @Test func repinDoesNotFireWithoutALockedPosition() throws {
         // A never-started manager has no lockedCursorPosition, so pointer
         // events must never trigger a re-pin warp. The positive drift case

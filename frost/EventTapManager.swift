@@ -233,6 +233,15 @@ final class EventTapManager: InputSuppressing {
 
     static let cursorDriftTolerance: CGFloat = 0.5
 
+    #if DEBUG
+    /// Test seam: `lockedCursorPosition` is otherwise only set inside `start()`,
+    /// which needs a real Accessibility-gated tap — so the drift branch could
+    /// never be reached from a test.
+    func primeLockedCursorPositionForTesting(_ point: CGPoint) {
+        lockedCursorPosition = point
+    }
+    #endif
+
     private func observeScreenChanges() {
         guard screenChangeObserver == nil else { return }
         screenChangeObserver = NotificationCenter.default.addObserver(
@@ -288,6 +297,28 @@ final class EventTapManager: InputSuppressing {
         return .reenabled(message: message)
     }
 
+    /// The side effects of a tap-disabled reaction, split out from `handle()`.
+    ///
+    /// `handle()`'s branch is gated on `shouldSuppress` and a live `tap`, both of
+    /// which only exist after a real Accessibility-gated `start()` — so no test
+    /// could ever execute it, and the escalation dispatch could be deleted
+    /// outright with the suite green. Internal so the dispatch is directly
+    /// callable.
+    func apply(_ reaction: TapDisabledReaction) {
+        switch reaction {
+        case .ignore:
+            break
+        case .reenabled(let message):
+            setCursorFrozen(true)
+            pinCursor()
+            log.error("Tap disabled by system; re-enabled")
+            Task { @MainActor [weak self] in self?.onTapReenabled?(message) }
+        case .reviveFailed:
+            log.fault("Tap disabled by system and re-enable FAILED; escalating to recovery")
+            Task { @MainActor [weak self] in self?.onTapReviveFailed?() }
+        }
+    }
+
     // MARK: - Callback handling (main actor)
 
     /// Returns `true` if the event should be swallowed. Internal (not
@@ -298,22 +329,11 @@ final class EventTapManager: InputSuppressing {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             if shouldSuppress, let tap {
                 CGEvent.tapEnable(tap: tap, enable: true)
-                switch Self.tapDisabledReaction(
+                apply(Self.tapDisabledReaction(
                     type: type,
                     shouldSuppress: shouldSuppress,
                     tapIsEnabledAfterReenable: CGEvent.tapIsEnabled(tap: tap)
-                ) {
-                case .ignore:
-                    break
-                case .reenabled(let message):
-                    setCursorFrozen(true)
-                    pinCursor()
-                    log.error("Tap disabled by system; re-enabled")
-                    Task { @MainActor [weak self] in self?.onTapReenabled?(message) }
-                case .reviveFailed:
-                    log.fault("Tap disabled by system and re-enable FAILED; escalating to recovery")
-                    Task { @MainActor [weak self] in self?.onTapReviveFailed?() }
-                }
+                ))
             }
             return false
         case .keyDown:

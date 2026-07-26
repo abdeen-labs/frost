@@ -13,12 +13,23 @@
 //
 
 import AppKit
+import Carbon.HIToolbox
 import Foundation
 import Testing
 
 @testable import frost
 
 // MARK: - Fakes
+
+/// Shared ordered call log. AGENTS.md fixes the order in which a lock takes
+/// resources ("SIGTERM handler -> debug auto-unlock -> recovery UI come before
+/// any input-suppressing code"), and call counts alone cannot observe order —
+/// so swapping two lines in lock() used to leave the whole suite green.
+@MainActor
+final class EventLog {
+    private(set) var events: [String] = []
+    func record(_ event: String) { events.append(event) }
+}
 
 @MainActor
 private final class FakeTap: InputSuppressing {
@@ -27,15 +38,25 @@ private final class FakeTap: InputSuppressing {
     var onTapReviveFailed: (() -> Void)?
     var unlockShortcut: Shortcut?
     var startSucceeds = true
+    /// Runs inside start(), so a test can observe controller state at the exact
+    /// moment input suppression begins.
+    var onStart: (() -> Void)?
     private(set) var startCount = 0
     private(set) var stopCount = 0
     private(set) var authenticating: Bool?
+    private let log: EventLog
+    init(log: EventLog) { self.log = log }
     func start() -> Bool {
         startCount += 1
+        log.record("tap.start")
+        onStart?()
         return startSucceeds
     }
     func setAuthenticating(_ on: Bool) { authenticating = on }
-    func stop() { stopCount += 1 }
+    func stop() {
+        stopCount += 1
+        log.record("tap.stop")
+    }
 }
 
 @MainActor
@@ -48,14 +69,20 @@ private final class FakeOverlay: OverlayPresenting {
     /// Simulates "no display could host an overlay" so the caller's refusal to
     /// lock behind an invisible overlay is testable.
     var presentSucceeds = true
+    private let log: EventLog
+    init(log: EventLog) { self.log = log }
     @discardableResult
     func present(controller: LockController, level: NSWindow.Level) -> Bool {
         presentCount += 1
         lastLevel = level
+        log.record("overlay.present")
         return presentSucceeds
     }
     func focusAuthenticationWindow() { focusCount += 1 }
-    func dismiss() { dismissCount += 1 }
+    func dismiss() {
+        dismissCount += 1
+        log.record("overlay.dismiss")
+    }
     func rebuildIfDeferred() { rebuildIfDeferredCount += 1 }
 }
 
@@ -91,10 +118,16 @@ private final class FakePermissions: AccessibilityChecking {
 private final class FakeSleep: SleepAsserting {
     private(set) var lastApply: (preventScreenSaver: Bool, preventSleep: Bool)?
     private(set) var releaseCount = 0
+    private let log: EventLog
+    init(log: EventLog) { self.log = log }
     func apply(preventScreenSaver: Bool, preventSleep: Bool) {
         lastApply = (preventScreenSaver, preventSleep)
+        log.record("sleep.apply")
     }
-    func releaseAll() { releaseCount += 1 }
+    func releaseAll() {
+        releaseCount += 1
+        log.record("sleep.releaseAll")
+    }
 }
 
 @MainActor
@@ -113,8 +146,16 @@ private final class FakeInactivity: InactivityMonitoring {
 private final class FakeKiosk: KioskModeControlling {
     private(set) var enterCount = 0
     private(set) var exitCount = 0
-    func enterKioskMode() { enterCount += 1 }
-    func exitKioskMode() { exitCount += 1 }
+    private let log: EventLog
+    init(log: EventLog) { self.log = log }
+    func enterKioskMode() {
+        enterCount += 1
+        log.record("kiosk.enter")
+    }
+    func exitKioskMode() {
+        exitCount += 1
+        log.record("kiosk.exit")
+    }
 }
 
 @MainActor
@@ -141,18 +182,24 @@ final class LockControllerTests {
     private let defaults: UserDefaults
     private let settings: SettingsStore
     private let permissions = FakePermissions()
-    private let tap = FakeTap()
-    private let overlay = FakeOverlay()
     private let unlocker = FakeUnlocker()
-    private let sleep = FakeSleep()
     private let inactivity = FakeInactivity()
-    private let kiosk = FakeKiosk()
     private let hooks = FakeSystemHooks()
+    private let eventLog = EventLog()
+    private let tap: FakeTap
+    private let overlay: FakeOverlay
+    private let sleep: FakeSleep
+    private let kiosk: FakeKiosk
 
     init() {
         suiteName = "dev.abdeen.frost.lock-tests.\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: suiteName)!
         settings = SettingsStore(defaults: defaults)
+        let log = eventLog
+        tap = FakeTap(log: log)
+        overlay = FakeOverlay(log: log)
+        sleep = FakeSleep(log: log)
+        kiosk = FakeKiosk(log: log)
     }
 
     deinit {
@@ -185,13 +232,157 @@ final class LockControllerTests {
         controller.lock()
 
         #expect(controller.state == .locked)
-        #expect(tap.startCount == 1)
+        // The ORDER, not just the counts: the overlay must exist before kiosk
+        // mode hides the Dock and menu bar, and power assertions come last.
+        #expect(eventLog.events == ["tap.start", "overlay.present", "kiosk.enter", "sleep.apply"])
         #expect(tap.unlockShortcut == settings.unlockShortcut)
-        #expect(overlay.presentCount == 1)
         #expect(overlay.lastLevel == .screenSaver)
-        #expect(kiosk.enterCount == 1)
         #expect(sleep.lastApply?.preventScreenSaver == true)
         #expect(sleep.lastApply?.preventSleep == false)
+    }
+
+    #if DEBUG
+    /// AGENTS.md escape hatch #2 and its ordering rule: the DEBUG auto-unlock
+    /// must be armed BEFORE any input-suppressing code runs, so a hang between
+    /// the two can never trap the user. Swapping those two lines in lock() left
+    /// every previous assertion green.
+    @Test func debugSafetyNetIsArmedBeforeTheTapStarts() {
+        let controller = makeController()
+        defer { controller.tearDownForTermination() }
+        var armedWhenTapStarted: Bool?
+        tap.onStart = { armedWhenTapStarted = controller.debugSecondsRemaining != nil }
+
+        controller.lock()
+
+        #expect(armedWhenTapStarted == true)
+    }
+
+    /// The positive case the suite never had: both existing assertions were
+    /// `== nil`, so emptying startDebugAutoUnlock() passed.
+    @Test func lockArmsTheDebugAutoUnlockCountdown() {
+        let controller = makeController()
+        defer { controller.tearDownForTermination() }
+
+        controller.lock()
+
+        #expect(controller.debugSecondsRemaining != nil)
+        #expect((controller.debugSecondsRemaining ?? 0) > 0)
+    }
+    #endif
+
+    /// lock() reads the CURRENT unlock shortcut, not the one captured at init.
+    /// The old assertion could not tell the two apart, so deleting the lock-time
+    /// refresh left the suite green and the overlay's displayed chord dead.
+    @Test func lockRefreshesTheTapWithTheCurrentlyConfiguredUnlockShortcut() {
+        let controller = makeController()
+        defer { controller.tearDownForTermination() }
+        let changed = Shortcut(keyCode: UInt16(kVK_ANSI_K),
+                               modifierFlags: [.control, .option, .command])
+        settings.unlockShortcut = changed
+
+        controller.lock()
+
+        #expect(tap.unlockShortcut == changed)
+        #expect(tap.unlockShortcut?.keyCode == UInt16(kVK_ANSI_K))
+    }
+
+    /// A revived tap must surface a VISIBLE warning without leaving the locked
+    /// state. FakeTap.onTapReenabled existed but no test ever invoked it, so the
+    /// whole wiring could be deleted with the suite green.
+    @Test func tapReenabledSurfacesAVisibleWarningAndStaysLocked() {
+        let controller = makeController()
+        defer { controller.tearDownForTermination() }
+        controller.lock()
+
+        tap.onTapReenabled?("macOS briefly stopped Frost's input blocking.")
+
+        #expect(controller.tapRecoveryNotice == "macOS briefly stopped Frost's input blocking.")
+        #expect(controller.state == .locked)
+        #expect(tap.stopCount == 0)
+    }
+
+    // MARK: Preflight refusals
+
+    /// Secure event input steals keyboard events from session taps, so the
+    /// in-tap unlock chord could never fire. Refuse the lock outright.
+    @Test func secureInputRefusesTheLockWithoutStartingTheTap() {
+        permissions.secureInputActive = true
+        let controller = makeController()
+        defer { controller.tearDownForTermination() }
+
+        controller.lock()
+
+        guard case .recovery = controller.state else {
+            Issue.record("Expected recovery, got \(controller.state)")
+            return
+        }
+        #expect(tap.startCount == 0)
+        #expect(kiosk.enterCount == 0)
+    }
+
+    /// No overlay window means no unlock hint and no warning surface. Suppressing
+    /// input behind nothing is exactly the trap the recovery state exists for.
+    @Test func overlayWithNoDisplaysBacksTheLockOutAndShowsRecovery() {
+        overlay.presentSucceeds = false
+        let controller = makeController()
+        defer { controller.tearDownForTermination() }
+
+        controller.lock()
+
+        guard case .recovery = controller.state else {
+            Issue.record("Expected recovery, got \(controller.state)")
+            return
+        }
+        #expect(tap.stopCount >= 1)          // the tap was backed out
+        #expect(kiosk.enterCount == 0)       // never entered kiosk mode
+        #if DEBUG
+        #expect(controller.debugSecondsRemaining == nil)
+        #endif
+    }
+
+    // MARK: Lock hotkey and the Accessibility gate
+
+    /// The global hotkey must fire only for the configured LOCK shortcut. The
+    /// captured callback was recorded by the fake and read by nothing, so a
+    /// regression matching the UNLOCK chord here would have shipped green.
+    @Test func lockHotKeyFiresOnlyForTheConfiguredLockShortcut() {
+        let lockChord = Shortcut(keyCode: UInt16(kVK_ANSI_L),
+                                 modifierFlags: [.control, .option, .command])
+        settings.lockShortcut = lockChord
+        let controller = makeController()
+        defer { controller.tearDownForTermination() }
+
+        // A non-matching chord must do nothing.
+        hooks.onLockHotKey?(UInt16(kVK_ANSI_J), [.control, .option, .command])
+        #expect(controller.state == .unlocked)
+        #expect(tap.startCount == 0)
+
+        hooks.onLockHotKey?(lockChord.keyCode, lockChord.modifierFlags)
+        #expect(controller.state == .locked)
+    }
+
+    /// With no lock shortcut configured, the hotkey path must never lock.
+    @Test func lockHotKeyDoesNothingWithoutAConfiguredLockShortcut() {
+        settings.lockShortcut = nil
+        let controller = makeController()
+        defer { controller.tearDownForTermination() }
+
+        hooks.onLockHotKey?(UInt16(kVK_ANSI_L), [.control, .option, .command])
+
+        #expect(controller.state == .unlocked)
+        #expect(tap.startCount == 0)
+    }
+
+    /// Accessibility missing at launch means the grant is not usable by this
+    /// process, so no global monitor may be installed — installing one would let
+    /// a hotkey start a lock the tap cannot actually enforce.
+    @Test func noLockHotKeyMonitorWhenAccessibilityWasMissingAtLaunch() {
+        permissions.trusted = false
+        let controller = makeController()
+        defer { controller.tearDownForTermination() }
+
+        #expect(hooks.onLockHotKey == nil)
+        #expect(controller.state == .unlocked)
     }
 
     @Test func lockWhileLockedIsANoOp() {
