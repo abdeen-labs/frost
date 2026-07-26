@@ -40,19 +40,23 @@ struct frostApp: App {
         )
     }
 
+    private var menuTitle: String {
+        if lock.isSuppressingInput { return "Locked" }
+        if lock.isHoldingLock { return "Locked — Input Not Blocked" }
+        return lock.isLocked ? "Input Not Locked" : "Lock Input"
+    }
+
     var body: some Scene {
         // LSUIElement agent: no Dock icon, no window — the menu bar is the UI.
         // `isInserted` lets the user hide the icon from Settings.
         MenuBarExtra("Frost", image: "MenuBarIcon", isInserted: $showInMenuBar) {
-            // "Locked" only when input really is suppressed. During recovery
-            // input is explicitly NOT locked and the overlay says so — the menu
-            // must not contradict it.
-            Button(lock.isSuppressingInput
-                   ? "Locked"
-                   : (lock.isLocked ? "Input Not Locked" : "Lock Input")) {
-                lock.lock()
-            }
-            .disabled(lock.isLocked)
+            // Three distinct truths, none of which may be misreported:
+            //   • suppressing        -> "Locked"
+            //   • holding but macOS killed the tap -> input is flowing again,
+            //     but Frost still requires authentication to let go
+            //   • recovery           -> the lock never started
+            Button(menuTitle) { lock.lock() }
+                .disabled(lock.isLocked)
 
             Divider()
 

@@ -378,6 +378,22 @@ struct LockOverlayView: View {
 
                 safetyStrip
 
+                if controller.inputSuppressionFailed, !authenticating {
+                    // The unlock chord lived inside the event tap that just
+                    // died, so this button is the only remaining route to the
+                    // prompt. Frost holds the lock until it succeeds.
+                    Button {
+                        controller.authenticateFromOverlay()
+                    } label: {
+                        Label("Unlock with \(controller.unlockMethodLabel)",
+                              systemImage: authenticationSymbol)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .keyboardShortcut(.defaultAction)
+                }
+
                 if let notice = controller.secureInputNotice {
                     warningText(notice)
                 }

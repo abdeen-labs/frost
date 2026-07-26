@@ -591,23 +591,96 @@ final class LockControllerTests {
         #expect(unlocker.authenticateCount == 1)
     }
 
-    // MARK: Tap revive failure — escalate, never a silent broken lock
+    // MARK: Tap revive failure — HOLD the lock, never self-unlock
 
-    @Test func tapReviveFailureUnlocksAndEntersInteractiveRecovery() {
+    /// THE INVARIANT: Frost never returns the machine without authentication.
+    /// macOS can kill the event tap, and Frost cannot stop that — but losing
+    /// the ability to BLOCK input must not become permission to RELEASE it.
+    /// Frost previously tore everything down here and showed a "Dismiss" card,
+    /// leaving the Mac wide open with no fingerprint involved.
+    @Test func tapReviveFailureHoldsTheLockAndNeverSelfUnlocks() {
         let controller = makeController()
+        defer { controller.tearDownForTermination() }
 
         controller.lock()
         tap.onTapReviveFailed?()
 
-        guard case .recovery(let recovery) = controller.state else {
-            Issue.record("expected .recovery, got \(controller.state)")
-            return
-        }
-        #expect(recovery.allowsRetry)
+        // Still holding the lock, still demanding authentication.
+        #expect(controller.state == .locked)
+        #expect(controller.isHoldingLock)
+        // The overlay stays up and kiosk options stay on.
+        #expect(overlay.dismissCount == 0)
+        #expect(kiosk.exitCount == 0)
+        #expect(overlay.lastLevel == .screenSaver)
+        // But Frost stops CLAIMING to block input, because it no longer does.
+        #expect(controller.isSuppressingInput == false)
+        #expect(controller.inputSuppressionFailed)
+        // The dead tap is released — which also re-couples the pointer, so the
+        // authenticate button is reachable.
         #expect(tap.stopCount == 1)
-        #expect(kiosk.exitCount >= 1)
-        #expect(sleep.releaseCount >= 1)
-        #expect(overlay.lastLevel == .floating)
+        // And the user is told, rather than left behind a silent broken lock.
+        #expect(controller.tapRecoveryNotice != nil)
+    }
+
+    /// The chord died with the tap, so the overlay button is the only remaining
+    /// route to the prompt. It must still lead to real authentication.
+    @Test func authenticatingFromTheOverlayIsTheOnlyWayOutAfterReviveFailure() async {
+        unlocker.result = .success
+        let controller = makeController()
+        defer { controller.tearDownForTermination() }
+
+        controller.lock()
+        tap.onTapReviveFailed?()
+        #expect(controller.state == .locked)
+
+        controller.authenticateFromOverlay()
+        if let task = controller.authenticationTask {
+            await task.value
+        }
+
+        #expect(unlocker.authenticateCount == 1)
+        #expect(controller.state == .unlocked)
+    }
+
+    /// A failed fingerprint after the tap died must NOT fall through to an
+    /// unlock. The lock is held until authentication actually succeeds.
+    @Test func failedAuthenticationAfterReviveFailureKeepsHoldingTheLock() async {
+        unlocker.result = .failed
+        let controller = makeController()
+        defer { controller.tearDownForTermination() }
+
+        controller.lock()
+        tap.onTapReviveFailed?()
+        controller.authenticateFromOverlay()
+        if let task = controller.authenticationTask {
+            await task.value
+        }
+
+        #expect(controller.state == .locked)
+        #expect(controller.isHoldingLock)
+        #expect(overlay.dismissCount == 0)
+    }
+
+    /// Losing Touch ID entirely mid-lock is NOT a reason to unlock. There is no
+    /// way to tell a locked-out owner from someone else at the keyboard, and
+    /// Frost will not make that judgement — the documented exits are a remote
+    /// `pkill` over SSH or a hard power-off.
+    @Test func authenticationBecomingUnavailableMidLockNeverUnlocks() async {
+        unlocker.result = .unavailable("Touch ID is locked after too many attempts.")
+        let controller = makeController()
+        defer { controller.tearDownForTermination() }
+
+        controller.lock()
+        controller.requestUnlock()
+        if let task = controller.authenticationTask {
+            await task.value
+        }
+
+        #expect(controller.state == .locked)
+        #expect(controller.isSuppressingInput)
+        #expect(overlay.dismissCount == 0)
+        #expect(tap.stopCount == 0)
+        #expect(controller.tapRecoveryNotice != nil)
     }
 
     @Test func retryFromRecoveryAttemptsAFreshLock() {

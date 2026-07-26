@@ -81,6 +81,21 @@ Frost deliberately does not:
 
 The only intended network activity is Sparkle update checking.
 
+## Frost Never Unlocks Itself
+
+Frost will not hand the machine back without Touch ID. Not after repeated failed
+attempts, not if Touch ID gets locked out, not if the sensor disconnects, not if
+macOS interferes with input blocking, not on any timer.
+
+This is deliberate. Frost cannot tell whether the person at the keyboard is the
+owner who locked themselves out or someone else who walked up, and it does not
+guess. If Touch ID cannot authenticate you, the way back is `pkill -x frost`
+over SSH from another device, or holding the power button. That is the trade
+Frost makes, and it is the reason the app is worth running at all.
+
+The one exception is debug builds, which include an auto-unlock timer so a
+developer cannot trap themselves. It is compiled out of release builds.
+
 ## Safety And Recovery
 
 Input suppression is inherently risky: a bug can leave the local keyboard and
@@ -142,6 +157,12 @@ nothing visible to reopen.
 If macOS disables the event tap while Frost is already locked, Frost attempts to
 re-enable it immediately and shows a visible warning on the overlay. If the tap
 cannot be created at all, Frost does not lock input.
+
+If the tap cannot be re-enabled, input is flowing again — macOS did that, and
+Frost cannot prevent it. Frost still does not unlock: it keeps the overlay up,
+stops claiming to block input, says what happened, and offers an **Unlock with
+Touch ID** button (the unlock shortcut lived inside the tap and is gone with
+it). Only authentication takes the overlay down.
 
 ### Force Quit
 

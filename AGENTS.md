@@ -14,13 +14,45 @@ Frost is a **macOS menu-bar input locker**. It blocks keyboard, mouse, and track
 
 Describe it as an *input suppressor + overlay manager + local auth gate*. Never document or market it as a security / lock-screen product.
 
+## THE INVARIANT — Frost never unlocks without authentication
+
+**Under no circumstances may Frost release a lock it is holding without a
+successful `LAContext` evaluation.** Not on repeated Touch ID failures, not on
+biometry lockout, not when the sensor disconnects, not when macOS kills the
+event tap, not on a timer, not on any heuristic about whether the person at the
+keyboard "looks like" the owner. There is no way to distinguish an owner who
+locked themselves out from someone else at the machine, and Frost does not
+attempt that judgement. If the only way back is a hard power-off, that is the
+correct outcome and the user opted into it.
+
+Consequences that follow, and must not be "fixed":
+
+- Biometry lockout after repeated failures is terminal while locked. It clears
+  only with a typed password, which the tap makes impossible. Say so plainly;
+  do not add an escape.
+- If macOS disables the event tap and it cannot be revived, input is flowing
+  again — macOS did that, not Frost, and Frost cannot prevent it. Frost still
+  does NOT let go: it releases the dead tap (which re-couples the pointer so the
+  authenticate button is reachable), keeps the overlay and kiosk options up,
+  stops claiming to block input, and requires authentication to dismiss.
+- There is no unlock App Intent, no URL scheme, and no "emergency dismiss".
+
+The ONLY paths that end a lock without authentication are process death
+(SIGTERM/SIGINT/SIGHUP over SSH, or a power-off) and the DEBUG auto-unlock
+timer, which is compiled out of release builds. Both are listed below. Adding a
+third is a breaking change to the product, not a bug fix.
+
+Refusing to START a lock is different and always allowed — a preflight failure
+(no Touch ID, no Accessibility, secure input held, no display for the overlay)
+means the lock never began and no input was ever taken.
+
 ## CRITICAL SAFETY — never lock the user out
 
 Input suppression can trap the user with no way to type or click. Every change must preserve **all** of these escape hatches. If a change would weaken any of them, stop and flag it.
 
 1. **Remote kill (SIGTERM).** Frost catches `SIGTERM` and tears the lock down cleanly (restores the cursor, releases the tap) before exiting, independent of app state. Because the event tap blocks *local* input, the realistic way to trigger it is **over SSH from another device** (`pkill -x frost` / `kill <pid>`) with Remote Login enabled in advance, or from a terminal you opened before locking — document it that way. (There is intentionally no in-repo killswitch script; the SIGTERM handler is the contract.)
 2. **Debug auto-unlock timer.** In DEBUG builds, a timer tears the lock down after N seconds regardless of auth. It must be present from the very first line of tap code and must never compile into release builds (`#if DEBUG`).
-3. **Visible recovery / warning state.** If the event tap can't be created, the overlay must show a clear, visible "input unavailable / how to recover" recovery state rather than silently trapping input. If the tap gets disabled (`tapDisabledByTimeout` / `tapDisabledByUserInput`) while locked, re-enable it and show a visible warning on the overlay.
+3. **Visible recovery / warning state.** If the event tap can't be created, the overlay must show a clear, visible "input unavailable / how to recover" recovery state rather than silently trapping input. If the tap gets disabled (`tapDisabledByTimeout` / `tapDisabledByUserInput`) while locked, re-enable it and show a visible warning on the overlay. If it cannot be re-enabled, keep holding the lock and require authentication — see THE INVARIANT above. These hatches exist so a lock never becomes *invisible* or *unexplained*; none of them is a way out without authentication.
 
 Force Quit (`⌘⌥Esc`) is deliberately disabled while locked (`NSApplicationPresentationOptions.disableForceQuit`): opening it steals focus from the authentication prompt and strands the user. The escape hatches above replace it. Order of implementation is fixed: **SIGTERM handler → debug auto-unlock → recovery UI come before any input-suppressing code.**
 

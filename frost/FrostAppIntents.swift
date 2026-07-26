@@ -7,7 +7,9 @@
 //  lock programmatically — the product's core workflow is "start an
 //  unattended task, then lock the desk".
 //
-//  SAFETY: the intent can only LOCK, never unlock. It calls the same
+//  SAFETY: the intent can only LOCK, never unlock — there is deliberately no
+//  unlock intent, because nothing but authentication may release a lock. It
+//  calls the same
 //  LockController.lock() entry point as the menu item, so every preflight
 //  (Touch ID availability, Accessibility) and every recovery/escape hatch
 //  applies unchanged. If the app is already locked or in recovery, the
@@ -42,12 +44,12 @@ struct LockInputIntent: AppIntent {
         guard let lock = LockController.shared else {
             throw LockInputIntentError.notReady
         }
-        // `isSuppressingInput`, not `isLocked`: the latter is also true during
-        // recovery, where input is explicitly NOT locked. Short-circuiting on it
-        // meant a stale recovery card from an earlier failed lock made this
-        // intent report success while the desk sat unlocked.
-        guard !lock.isSuppressingInput else {
-            return .result()   // already suppressing input: no-op
+        // `isHoldingLock`, not `isLocked`: the latter is also true during
+        // recovery, where the lock never started. Short-circuiting on it meant a
+        // stale recovery card from an earlier failed lock made this intent
+        // report success while the desk sat unlocked.
+        guard !lock.isHoldingLock else {
+            return .result()   // a lock is already being held: no-op
         }
         lock.lock()
 
