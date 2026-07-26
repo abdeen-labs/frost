@@ -98,6 +98,13 @@ final class LockController: ObservableObject {
     var unlockMethodLabel: String {
         settings.allowWatchUnlock ? "Touch ID or Apple Watch" : "Touch ID"
     }
+    /// The current recovery message, if a recovery overlay is showing. Lets a
+    /// non-visual caller (the Lock Input intent) report WHY a lock did not
+    /// happen instead of failing opaquely.
+    var recoveryMessage: String? {
+        guard case .recovery(let recovery) = state else { return nil }
+        return recovery.message
+    }
 
     /// Collaborators default (nil) to the real implementations, constructed in
     /// the body because default-argument expressions are nonisolated and the
@@ -409,11 +416,29 @@ final class LockController: ObservableObject {
         teardown()
     }
 
+    /// Open the Accessibility pane, and only then tear the recovery card down.
+    /// The old order dismissed first and discarded `open`'s result, so if the
+    /// legacy pane URL ever stops resolving the user's card vanished, nothing
+    /// opened, and — with the menu-bar icon hidden — Frost had no UI left at all.
     func openAccessibilitySettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            dismissRecovery()
-            NSWorkspace.shared.open(url)
+        guard case .recovery(let recovery) = state else { return }
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"),
+              NSWorkspace.shared.open(url)
+        else {
+            log.error("Could not open the Accessibility settings pane")
+            state = .recovery(RecoveryState(
+                title: recovery.title,
+                message: """
+                    Frost couldn't open System Settings. Open it yourself and \
+                    enable Frost under Privacy & Security → Accessibility, then \
+                    choose Quit & Reopen. Input is NOT locked.
+                    """,
+                showsAccessibilitySettings: recovery.showsAccessibilitySettings,
+                allowsRetry: recovery.allowsRetry
+            ))
+            return
         }
+        dismissRecovery()
     }
 
     /// Quit and reopen in one action: a fresh Accessibility grant usually isn't
@@ -423,19 +448,55 @@ final class LockController: ObservableObject {
     /// relaunch fails, Frost stays running rather than stranding the user with
     /// nothing.
     func quitAndReopenFrost() {
-        if case .recovery = state {
-            teardown()
+        let previousRecovery: RecoveryState?
+        if case .recovery(let recovery) = state {
+            previousRecovery = recovery
+        } else {
+            previousRecovery = nil
         }
+
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.createsNewApplicationInstance = true
+        // Tell the new instance it was launched by this flow so it opens
+        // Settings. A plain launch deliberately shows nothing (so login stays
+        // silent), which left this action — the documented exit from the
+        // Accessibility dead end — relaunching into an invisible app at exactly
+        // the moment the user needs confirmation the new grant took effect.
+        configuration.arguments = [Self.showSettingsLaunchArgument]
         NSWorkspace.shared.openApplication(
             at: Bundle.main.bundleURL,
             configuration: configuration
-        ) { _, error in
-            guard error == nil else { return }
-            Task { @MainActor in NSApp.terminate(nil) }
+        ) { [weak self] _, error in
+            Task { @MainActor in
+                guard error == nil else {
+                    // Keep the user where they were rather than silently doing
+                    // nothing: the old code returned here having ALREADY torn
+                    // the recovery card down.
+                    self?.log.error("Relaunch failed; staying alive")
+                    if let previousRecovery {
+                        self?.state = .recovery(RecoveryState(
+                            title: previousRecovery.title,
+                            message: """
+                                Frost couldn't relaunch itself. Quit Frost from \
+                                the menu bar and open it again so the new \
+                                permission takes effect. Input is NOT locked.
+                                """,
+                            showsAccessibilitySettings: previousRecovery.showsAccessibilitySettings,
+                            allowsRetry: previousRecovery.allowsRetry
+                        ))
+                    }
+                    return
+                }
+                // Only now is the replacement definitely running.
+                self?.teardown()
+                NSApp.terminate(nil)
+            }
         }
     }
+
+    /// Launch argument that asks a freshly-launched Frost to open Settings.
+    /// Only `quitAndReopenFrost` passes it, so a login-item launch stays silent.
+    static let showSettingsLaunchArgument = "--show-settings"
 
     // MARK: - Teardown
 

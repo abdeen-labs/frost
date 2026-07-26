@@ -42,19 +42,43 @@ struct LockInputIntent: AppIntent {
         guard let lock = LockController.shared else {
             throw LockInputIntentError.notReady
         }
-        guard !lock.isLocked else {
-            return .result()   // already locked or in recovery: no-op
+        // `isSuppressingInput`, not `isLocked`: the latter is also true during
+        // recovery, where input is explicitly NOT locked. Short-circuiting on it
+        // meant a stale recovery card from an earlier failed lock made this
+        // intent report success while the desk sat unlocked.
+        guard !lock.isSuppressingInput else {
+            return .result()   // already suppressing input: no-op
         }
         lock.lock()
+
+        // lock() is non-throwing and resolves to input-suppressed OR one of
+        // three recovery states (Touch ID unavailable, Accessibility missing,
+        // tap start failed). Returning .result() unconditionally reported
+        // success for all four. The documented usage is
+        // `shortcuts run "Lock Input"` from a script, so a caller that cannot
+        // observe the difference proceeds with an unattended task on an
+        // unlocked machine — exactly the outcome it asked to prevent.
+        guard lock.isSuppressingInput else {
+            throw LockInputIntentError.lockFailed(lock.recoveryMessage)
+        }
         return .result()
     }
 }
 
 enum LockInputIntentError: Error, CustomLocalizedStringResourceConvertible {
     case notReady
+    case lockFailed(String?)
 
     var localizedStringResource: LocalizedStringResource {
-        "Frost is still starting. Try again in a moment."
+        switch self {
+        case .notReady:
+            return "Frost is still starting. Try again in a moment."
+        case .lockFailed(let reason):
+            guard let reason else {
+                return "Frost could not lock input. Input is NOT locked."
+            }
+            return "Frost could not lock input: \(reason)"
+        }
     }
 }
 

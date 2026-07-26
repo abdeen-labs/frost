@@ -35,7 +35,7 @@ struct SettingsView: View {
             } header: {
                 Text("Unlock")
             } footer: {
-                Text("Required. Press this while locked to bring up Touch ID. Click the field and press a new combo to change it, or ⎋ to cancel. Turn on automatic start to show Touch ID as soon as a lock begins. Frost requires Touch ID — or, if enabled, a paired, unlocked Apple Watch (double-press its side button when prompted).\n\nEmergency exit: if Touch ID can't unlock, run `pkill -x frost` over SSH from another device. Turn on Remote Login in System Settings before you rely on Frost.")
+                Text("Required. Press this while locked to bring up Touch ID. Click the field (or focus it and press Space) and press a new combo to change it, or ⎋ to cancel. Shortcuts must include at least one of ⌃, ⌥, or ⌘. Turn on automatic start to show Touch ID as soon as a lock begins. Frost requires Touch ID — or, if enabled, a paired, unlocked Apple Watch (double-press its side button when prompted).\n\nEmergency exit: if Touch ID can't unlock, run `pkill -x frost` over SSH from another device. Turn on Remote Login in System Settings before you rely on Frost.")
                     .foregroundStyle(.secondary)
             }
 
@@ -60,7 +60,7 @@ struct SettingsView: View {
                         Text(lockShortcutNotice)
                             .foregroundStyle(.orange)
                     }
-                    Text("Optional. A system-wide hotkey that locks input from anywhere. Click the field and press a combo to set it; press ⌫ or Clear to remove it, or ⎋ to cancel. If it matches Unlock, Frost clears it.")
+                    Text("Optional. A system-wide hotkey that locks input from anywhere. Click the field (or focus it and press Space) and press a combo to set it; press ⌫ or Clear to remove it, or ⎋ to cancel. Shortcuts must include at least one of ⌃, ⌥, or ⌘. It can't match Unlock — changing Unlock to match will clear it.")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -92,10 +92,19 @@ struct SettingsView: View {
             Section {
                 TextField("Message", text: $settings.lockMessage,
                           prompt: Text("Optional, e.g. \u{201C}Agent run in progress — do not touch\u{201D}"))
+                    .onChange(of: settings.lockMessage) { _, new in
+                        // Bound at the source as well as on the overlay: while
+                        // input is suppressed the user can neither scroll the
+                        // card nor switch away, so an over-long message must
+                        // never be able to displace the unlock hint.
+                        if new.count > Self.lockMessageLimit {
+                            settings.lockMessage = String(new.prefix(Self.lockMessageLimit))
+                        }
+                    }
             } header: {
                 Text("Overlay Message")
             } footer: {
-                Text("Shown on the locked overlay while input is suppressed. Leave empty for none.")
+                Text("Shown on the locked overlay while input is suppressed. Leave empty for none. Long messages are shortened so the unlock shortcut stays visible.")
                     .foregroundStyle(.secondary)
             }
 
@@ -162,6 +171,11 @@ struct SettingsView: View {
         }
     }
 
+    /// Upper bound on the owner message. Generous enough for a sentence or two
+    /// of instructions, short enough that the locked card cannot outgrow a
+    /// display and push the unlock-shortcut hint off-screen.
+    private static let lockMessageLimit = 280
+
     /// Marketing version for the Updates footer — a Sparkle-updated app should
     /// say somewhere what version is running.
     private static var appVersion: String {
@@ -190,8 +204,14 @@ struct SettingsView: View {
         Binding(
             get: { settings.lockShortcut },
             set: {
+                // Reject WITHOUT mutating. Assigning nil here used to delete a
+                // lock shortcut the user had already configured — so mistakenly
+                // recording the unlock chord silently disabled the global lock
+                // hotkey, under a notice that said "Not saved". The unlock-side
+                // binding still has to clear (there the collision is created by
+                // changing the OTHER shortcut, and something must give), but
+                // nothing forces a clear on this path.
                 guard $0 != settings.unlockShortcut else {
-                    settings.lockShortcut = nil
                     lockShortcutNotice = "Not saved — the lock shortcut can't match the unlock shortcut."
                     NSSound.beep()
                     return
