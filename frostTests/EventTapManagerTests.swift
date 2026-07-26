@@ -196,21 +196,34 @@ struct EventTapManagerTests {
             tapIsEnabledAfterReenable: false
         ) == .reviveFailed)
 
-        #expect(EventTapManager.tapDisabledReaction(
+        // Assert what the message has to CONVEY, not its exact prose. This text
+        // is the banner a user finds on a locked screen, so the load-bearing
+        // part is that it tells them input is still locked; transcribing the
+        // string here would only make copy edits fail the suite.
+        let timeout = EventTapManager.tapDisabledReaction(
             type: .tapDisabledByTimeout,
             shouldSuppress: true,
             tapIsEnabledAfterReenable: true
-        ) == .reenabled(
-            message: "The input tap was disabled by macOS after it stopped responding, then re-enabled."
-        ))
-
-        #expect(EventTapManager.tapDisabledReaction(
+        )
+        let userInput = EventTapManager.tapDisabledReaction(
             type: .tapDisabledByUserInput,
             shouldSuppress: true,
             tapIsEnabledAfterReenable: true
-        ) == .reenabled(
-            message: "The input tap was disabled by macOS, then re-enabled."
-        ))
+        )
+
+        guard case .reenabled(let timeoutMessage) = timeout,
+              case .reenabled(let userInputMessage) = userInput
+        else {
+            Issue.record("A revived tap must report .reenabled, got \(timeout) / \(userInput)")
+            return
+        }
+
+        // Both must reassure the user that input is still locked...
+        #expect(timeoutMessage.contains("still locked"))
+        #expect(userInputMessage.contains("still locked"))
+        // ...and the timeout variant must stay distinguishable, since it names a
+        // different cause (Frost was slow to respond) than a plain disable.
+        #expect(timeoutMessage != userInputMessage)
     }
 
     @Test func repinDoesNotFireWithoutALockedPosition() throws {

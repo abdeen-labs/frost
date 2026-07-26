@@ -236,9 +236,14 @@ final class EventTapManager: InputSuppressing {
     ) -> TapDisabledReaction {
         guard shouldSuppress else { return .ignore }
         guard tapIsEnabledAfterReenable else { return .reviveFailed }
+        // User-facing copy, so it names the outcome rather than the mechanism:
+        // "input tap" is a CGEventTap implementation detail, and the reader is
+        // someone who just found an alarm banner on a locked screen and needs to
+        // know whether their input is still locked. Matches the vocabulary
+        // LockController already uses ("Frost's input blocking").
         let message = type == .tapDisabledByTimeout
-            ? "The input tap was disabled by macOS after it stopped responding, then re-enabled."
-            : "The input tap was disabled by macOS, then re-enabled."
+            ? "macOS briefly stopped Frost's input blocking because Frost was slow to respond. It has been restored — input is still locked."
+            : "macOS briefly stopped Frost's input blocking. It has been restored — input is still locked."
         return .reenabled(message: message)
     }
 

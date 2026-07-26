@@ -90,6 +90,14 @@ final class LockController: ObservableObject {
     var unlockShortcutSpoken: String { settings.unlockShortcut.spokenString }
     /// Optional owner-supplied message shown on the locked overlay (empty = none).
     var lockMessage: String { settings.lockMessage }
+    /// True when the user opted in to Apple Watch unlock. With it on, a Mac with
+    /// no Touch ID sensor at all can enter a lock (the preflight accepts a paired
+    /// Watch instead), so the overlay must not name Touch ID as the only way out.
+    var allowsWatchUnlock: Bool { settings.allowWatchUnlock }
+    /// How the overlay should name the unlock method it is asking for.
+    var unlockMethodLabel: String {
+        settings.allowWatchUnlock ? "Touch ID or Apple Watch" : "Touch ID"
+    }
 
     /// Collaborators default (nil) to the real implementations, constructed in
     /// the body because default-argument expressions are nonisolated and the
@@ -218,7 +226,7 @@ final class LockController: ObservableObject {
             break
         case .unavailable(let message, let allowsRetry):
             enterRecovery(RecoveryState(
-                title: "Touch ID Required",
+                title: "\(unlockMethodLabel) Required",
                 message: message,
                 allowsRetry: allowsRetry
             ))
