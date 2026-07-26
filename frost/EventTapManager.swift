@@ -19,6 +19,7 @@
 //  main thread; we assert main-actor isolation to call back into this class.
 //
 
+import AppKit
 import CoreGraphics
 import Foundation
 import os
@@ -91,10 +92,11 @@ final class EventTapManager: InputSuppressing {
     /// suppressed and the cursor stays frozen — the screen is never exposed.
     private var passEscapeToSystem = false
     private var lockedCursorPosition: CGPoint?
+    /// Observer for display reconfiguration, so the pin point can be re-seated
+    /// onto a display that still exists. Installed only while suppressing.
+    private var screenChangeObserver: (any NSObjectProtocol)?
     private let log = Logger(subsystem: "dev.abdeen.frost", category: "EventTap")
     private let cursor: any CursorControlling
-
-    private(set) var isRunning = false
 
     /// `cursor` defaults (nil) to the real WindowServer-backed implementation,
     /// constructed in the body because default-argument expressions are
@@ -165,10 +167,10 @@ final class EventTapManager: InputSuppressing {
         tap = port
         runLoopSource = source
         shouldSuppress = true
-        isRunning = true
         lockedCursorPosition = cursor.currentLocation()
         setCursorFrozen(true)
         pinCursor()
+        observeScreenChanges()
 
         log.info("Event tap started at session level")
         return true
@@ -187,6 +189,10 @@ final class EventTapManager: InputSuppressing {
     func stop() {
         shouldSuppress = false
         passEscapeToSystem = false
+        if let screenChangeObserver {
+            NotificationCenter.default.removeObserver(screenChangeObserver)
+            self.screenChangeObserver = nil
+        }
         if let tap { CGEvent.tapEnable(tap: tap, enable: false) }
         if let runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
@@ -194,7 +200,6 @@ final class EventTapManager: InputSuppressing {
         if let tap { CFMachPortInvalidate(tap) }
         runLoopSource = nil
         tap = nil
-        isRunning = false
         lockedCursorPosition = nil
         setCursorFrozen(false)   // ALWAYS restore the cursor
         log.info("Event tap stopped")
@@ -211,6 +216,42 @@ final class EventTapManager: InputSuppressing {
         guard let lockedCursorPosition else { return }
         cursor.warp(to: lockedCursorPosition)
         setCursorFrozen(true)
+    }
+
+    /// Exact CGPoint inequality made this permanently true once the pin point
+    /// stopped being reachable — after a display is disconnected the
+    /// WindowServer clamps the cursor into the remaining bounds, so the warp can
+    /// never land on the stored point again. The "only re-pin on drift"
+    /// optimization then inverted into two synchronous WindowServer calls on
+    /// every pointer event, at up-to-1000 Hz. Compare with a tolerance instead.
+    /// Internal so the drift decision is directly testable.
+    func hasCursorDrifted(from location: CGPoint) -> Bool {
+        guard let lockedCursorPosition else { return false }
+        return abs(location.x - lockedCursorPosition.x) > Self.cursorDriftTolerance
+            || abs(location.y - lockedCursorPosition.y) > Self.cursorDriftTolerance
+    }
+
+    static let cursorDriftTolerance: CGFloat = 0.5
+
+    private func observeScreenChanges() {
+        guard screenChangeObserver == nil else { return }
+        screenChangeObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            Task { @MainActor [weak self] in self?.reseatCursorPin() }
+        }
+    }
+
+    /// Re-seat the pin point after a display reconfiguration, clamping it onto a
+    /// display that still exists. Called by LockController, which already
+    /// observes screen changes for the overlay.
+    func reseatCursorPin() {
+        guard shouldSuppress else { return }
+        guard let current = cursor.currentLocation() else { return }
+        lockedCursorPosition = current
+        pinCursor()
     }
 
     /// What the callback should do when macOS delivers a tap-disabled marker.
@@ -290,9 +331,7 @@ final class EventTapManager: InputSuppressing {
             // stays at the pinned point. Re-pin — two synchronous WindowServer
             // calls — only when the location shows it actually drifted, instead
             // of on every pointer event at up-to-1000 Hz polling rates.
-            if isPointerEvent(type),
-               let lockedCursorPosition,
-               event.location != lockedCursorPosition {
+            if isPointerEvent(type), hasCursorDrifted(from: event.location) {
                 pinCursor()
             }
             return true

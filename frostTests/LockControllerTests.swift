@@ -45,9 +45,14 @@ private final class FakeOverlay: OverlayPresenting {
     private(set) var focusCount = 0
     private(set) var dismissCount = 0
     private(set) var rebuildIfDeferredCount = 0
-    func present(controller: LockController, level: NSWindow.Level) {
+    /// Simulates "no display could host an overlay" so the caller's refusal to
+    /// lock behind an invisible overlay is testable.
+    var presentSucceeds = true
+    @discardableResult
+    func present(controller: LockController, level: NSWindow.Level) -> Bool {
         presentCount += 1
         lastLevel = level
+        return presentSucceeds
     }
     func focusAuthenticationWindow() { focusCount += 1 }
     func dismiss() { dismissCount += 1 }
@@ -72,12 +77,14 @@ private final class FakeUnlocker: UnlockAuthenticating {
 private final class FakePermissions: AccessibilityChecking {
     var trusted = true
     private(set) var requestCount = 0
+    var secureInputActive = false
     func hasAccessibility() -> Bool { trusted }
     @discardableResult
     func requestAccessibility() -> Bool {
         requestCount += 1
         return trusted
     }
+    func isSecureInputActive() -> Bool { secureInputActive }
 }
 
 @MainActor

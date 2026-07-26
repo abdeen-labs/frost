@@ -36,6 +36,10 @@ struct RecoveryState: Equatable {
 final class LockController: ObservableObject {
     @Published private(set) var state: LockState = .unlocked
     @Published private(set) var tapRecoveryNotice: String?
+    /// Set while secure event input is held by another process during a lock.
+    /// Kept separate from `tapRecoveryNotice` so the two warnings can coexist
+    /// and neither clears the other.
+    @Published private(set) var secureInputNotice: String?
     #if DEBUG
     @Published private(set) var debugSecondsRemaining: Int?
     #endif
@@ -66,6 +70,10 @@ final class LockController: ObservableObject {
     private var lockHotKeyMonitorInstalled = false
     /// Internal get so state-machine tests can await the in-flight evaluation.
     private(set) var authenticationTask: Task<Void, Never>?
+
+    /// How often to re-check secure event input while locked.
+    private let secureInputPollSeconds: Double = 2
+    private var secureInputWatchTask: Task<Void, Never>?
 
     #if DEBUG
     /// DEBUG-only: the lock always tears down after this many seconds, no matter
@@ -182,6 +190,13 @@ final class LockController: ObservableObject {
         let currentlyTrusted = permissions.hasAccessibility()
         if !currentlyTrusted {
             accessibilityRequiresRelaunch = true
+        } else if accessibilityTrustedAtLaunch {
+            // Trust is back AND this process had a usable grant at launch, so
+            // the tap and the global monitor still work — nothing needs a
+            // relaunch. Without this the latch was one-way: toggling Frost off
+            // and back on in System Settings (exactly what a user does while
+            // troubleshooting) permanently killed the lock hotkey, silently.
+            accessibilityRequiresRelaunch = false
         }
 
         guard accessibilityTrustedAtLaunch,
@@ -240,6 +255,22 @@ final class LockController: ObservableObject {
             return
         }
 
+        // Secure event input steals keyboard events from session-level taps, so
+        // the tap would be created, the pointer frozen and ⌘Tab/Force Quit
+        // disabled — while the in-tap unlock chord could never fire. Refuse the
+        // lock rather than enter one with no in-app way out.
+        guard !permissions.isSecureInputActive() else {
+            enterRecovery(RecoveryState(
+                message: """
+                Another app has secure keyboard entry turned on, so Frost can't \
+                see the keyboard — including your unlock shortcut. Close any \
+                open password field or password-manager window and try again. \
+                Input is NOT locked.
+                """
+            ))
+            return
+        }
+
         // Without Accessibility the tap can't suppress input. Prompt, then show
         // the recovery state — never a lock the user can't escape. A fresh grant
         // often is not usable by the current process, so the user must relaunch
@@ -280,11 +311,26 @@ final class LockController: ObservableObject {
             return
         }
 
-        overlay.present(controller: self, level: .screenSaver)
+        // No overlay window means no on-screen explanation, no unlock-shortcut
+        // hint and no warning surface — an invisible lock. Back the tap out
+        // rather than suppress input behind nothing.
+        guard overlay.present(controller: self, level: .screenSaver) else {
+            overlay.dismiss()
+            tap.stop()
+            stopDebugAutoUnlock()
+            enterRecovery(RecoveryState(
+                message: """
+                Frost couldn't put its overlay on any display, so it did not \
+                lock input. Try again once your displays have settled.
+                """
+            ))
+            return
+        }
         kiosk.enterKioskMode()
         sleep.apply(preventScreenSaver: settings.preventScreenSaver,
                     preventSleep: settings.preventSleep)
         tapRecoveryNotice = nil
+        startSecureInputWatch()
         state = .locked
 
         // Optionally open Touch ID right away instead of waiting for the unlock
@@ -332,6 +378,14 @@ final class LockController: ObservableObject {
 
         authenticationTask = Task { [weak self] in
             guard let self else { return }
+            // Re-check BEFORE the suspension point. This task is created
+            // synchronously but its body doesn't start until the main actor
+            // yields, so teardown() — from the tap-revive failure, the SIGTERM
+            // handler, or the DEBUG timer — can run first. Its unlocker.cancel()
+            // is a no-op then (no context exists yet), so without this the
+            // evaluation would still start and raise a Touch ID prompt after the
+            // lock was already gone.
+            guard !Task.isCancelled, self.state == .authenticating else { return }
             let result = await self.unlocker.authenticate(reason: "Unlock Frost")
             if Task.isCancelled { return }
             self.authenticationTask = nil
@@ -502,6 +556,7 @@ final class LockController: ObservableObject {
 
     private func teardown() {
         stopDebugAutoUnlock()
+        stopSecureInputWatch()
         kiosk.exitKioskMode()
         sleep.releaseAll()
         tap.stop()
@@ -524,6 +579,49 @@ final class LockController: ObservableObject {
         guard state != .unlocked else { return }
         log.notice("Termination while active; running teardown backstop")
         teardown()
+    }
+
+    // MARK: - Secure input watch
+
+    /// Secure event input can also be turned on AFTER a lock begins, which kills
+    /// the in-tap unlock chord mid-session. Watch for it and say so on the
+    /// overlay.
+    ///
+    /// This deliberately WARNS rather than tearing the lock down the way
+    /// `handleTapReviveFailure` does. Auto-unlocking on this signal would mean a
+    /// false positive silently unlocks an unattended Mac — the worst failure
+    /// this app has — and the system authentication prompt may itself hold
+    /// secure input while it is up. The check is therefore skipped outside the
+    /// idle locked state, and the response is a visible warning naming the
+    /// remote-kill route that still works.
+    ///
+    /// NEEDS HARDWARE VERIFICATION: confirm whether the LocalAuthentication
+    /// prompt toggles secure input on this OS before considering escalation.
+    private func startSecureInputWatch() {
+        secureInputWatchTask?.cancel()
+        secureInputNotice = nil
+        secureInputWatchTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(secureInputPollSeconds))
+                if Task.isCancelled { return }
+                guard let self else { return }
+                // Only from the idle locked state — see the note above.
+                guard self.state == .locked else { continue }
+                self.secureInputNotice = self.permissions.isSecureInputActive()
+                    ? """
+                      Another app turned on secure keyboard entry, so \
+                      \(self.settings.unlockShortcut.displayString) may not reach Frost. \
+                      If it doesn't work, run `pkill -x frost` over SSH from another device.
+                      """
+                    : nil
+            }
+        }
+    }
+
+    private func stopSecureInputWatch() {
+        secureInputWatchTask?.cancel()
+        secureInputWatchTask = nil
+        secureInputNotice = nil
     }
 
     // MARK: - DEBUG auto-unlock safety net

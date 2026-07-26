@@ -148,9 +148,20 @@ final class UnlockCoordinator: UnlockAuthenticating {
         switch code {
         case .userCancel, .systemCancel, .appCancel:
             return .cancelled
+        case .invalidContext, .notInteractive:
+            // Neither is a rejected fingerprint. Reporting them as .failed told
+            // the user "Touch ID didn't match", which is simply untrue and sends
+            // them back to the sensor instead of re-opening the prompt.
+            return .cancelled
         case .authenticationFailed, .userFallback:
             return .failed
         case .biometryLockout, .biometryNotAvailable, .biometryNotEnrolled, .passcodeNotSet:
+            return .unavailable(touchIDUnavailableMessage(nsError, whileLocked: true, allowsWatch: allowsWatch))
+        case .biometryDisconnected, .biometryNotPaired, .watchNotAvailable:
+            // The sensor or Watch went away mid-session — e.g. a Magic Keyboard
+            // with Touch ID dropping its Bluetooth link on a Mac mini/Studio.
+            // As .failed this told the user their fingerprint was rejected and
+            // to press a chord on a keyboard that is no longer connected.
             return .unavailable(touchIDUnavailableMessage(nsError, whileLocked: true, allowsWatch: allowsWatch))
         default:
             return .failed
@@ -223,6 +234,17 @@ final class UnlockCoordinator: UnlockAuthenticating {
             return """
                 Touch ID needs a Mac login password before Frost can use it. Set \
                 one up in System Settings, then try again. Input was not locked.
+                """
+        case .biometryDisconnected, .biometryNotPaired:
+            return """
+                Frost can't reach the Touch ID sensor — a keyboard with Touch ID \
+                may have disconnected. Reconnect it and try again. Input was not \
+                locked.
+                """
+        case .watchNotAvailable:
+            return """
+                Frost can't reach your Apple Watch. Make sure it is unlocked and \
+                nearby, then try again. Input was not locked.
                 """
         default:
             return """

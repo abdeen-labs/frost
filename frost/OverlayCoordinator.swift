@@ -24,7 +24,8 @@ import SwiftUI
 /// can be tested without creating real NSWindows on every display.
 @MainActor
 protocol OverlayPresenting: AnyObject {
-    func present(controller: LockController, level: NSWindow.Level)
+    @discardableResult
+    func present(controller: LockController, level: NSWindow.Level) -> Bool
     func focusAuthenticationWindow()
     func dismiss()
     func rebuildIfDeferred()
@@ -58,7 +59,11 @@ final class OverlayCoordinator: NSObject, OverlayPresenting {
         }
     }
 
-    func present(controller: LockController, level: NSWindow.Level = .screenSaver) {
+    /// Returns false when no overlay window could be created (no screens), so
+    /// the caller can refuse to enter a lock that would suppress input with
+    /// nothing on screen to explain it.
+    @discardableResult
+    func present(controller: LockController, level: NSWindow.Level = .screenSaver) -> Bool {
         self.controller = controller
         self.level = level
         rebuild()
@@ -71,6 +76,7 @@ final class OverlayCoordinator: NSObject, OverlayPresenting {
             object: nil)
         show()
         log.info("Overlay presented on \(self.windows.count, privacy: .public) display(s)")
+        return !windows.isEmpty
     }
 
     private func show() {
@@ -91,9 +97,13 @@ final class OverlayCoordinator: NSObject, OverlayPresenting {
     /// system Touch ID prompt take focus — with the active-display window keyed so
     /// the prompt is biased onto the display where the lock was triggered.
     func focusAuthenticationWindow() {
+        // Activate FIRST, before the empty-window bail-out. Frost is an
+        // LSUIElement agent, so without this the system authentication prompt
+        // cannot take focus — and an empty window set is exactly when the user
+        // has no other affordance left.
+        NSApp.activate(ignoringOtherApps: true)
         guard !windows.isEmpty else { return }
         let keyIndex = min(max(authenticationWindowIndex, 0), windows.count - 1)
-        NSApp.activate(ignoringOtherApps: true)
         windows[keyIndex].makeKeyAndOrderFront(nil)
     }
 
@@ -110,18 +120,24 @@ final class OverlayCoordinator: NSObject, OverlayPresenting {
     /// What a screen-parameters change should do. Pure: rebuilding mid-auth
     /// churns focus out from under the live Touch ID prompt, so it must defer.
     enum ScreenChangeAction: Equatable {
-        case ignore              // no windows: nothing presented, nothing to do
+        case ignore              // nothing presented at all: nothing to do
         case deferUntilAuthEnds  // live Touch ID prompt: rebuild later
         case rebuild
     }
 
-    static func screenChangeAction(hasWindows: Bool, isAuthenticating: Bool) -> ScreenChangeAction {
-        guard hasWindows else { return .ignore }
+    /// Keyed on whether a controller is still PRESENTED, not on whether windows
+    /// currently exist. `rebuild()` repopulates from `NSScreen.screens`, so a
+    /// display reconfiguration that momentarily reports zero screens leaves the
+    /// window set empty — and keying on `hasWindows` made that state permanent:
+    /// every later screen change took `.ignore`, so the overlay never came back
+    /// while the tap kept suppressing input with nothing on screen.
+    static func screenChangeAction(isPresented: Bool, isAuthenticating: Bool) -> ScreenChangeAction {
+        guard isPresented else { return .ignore }
         return isAuthenticating ? .deferUntilAuthEnds : .rebuild
     }
 
-    static func shouldApplyDeferredRebuild(needsRebuildAfterAuth: Bool, hasWindows: Bool) -> Bool {
-        needsRebuildAfterAuth && hasWindows
+    static func shouldApplyDeferredRebuild(needsRebuildAfterAuth: Bool, isPresented: Bool) -> Bool {
+        needsRebuildAfterAuth && isPresented
     }
 
     @objc private func screenParametersChanged() {
@@ -131,7 +147,7 @@ final class OverlayCoordinator: NSObject, OverlayPresenting {
         // (after idle) both fire this notification right when the first prompt is
         // up. Defer the rebuild until authentication ends.
         switch Self.screenChangeAction(
-            hasWindows: !windows.isEmpty, isAuthenticating: controller?.isAuthenticating == true
+            isPresented: controller != nil, isAuthenticating: controller?.isAuthenticating == true
         ) {
         case .ignore:
             return
@@ -150,7 +166,7 @@ final class OverlayCoordinator: NSObject, OverlayPresenting {
     /// change that happened while the prompt was up.
     func rebuildIfDeferred() {
         guard Self.shouldApplyDeferredRebuild(
-            needsRebuildAfterAuth: needsRebuildAfterAuth, hasWindows: !windows.isEmpty
+            needsRebuildAfterAuth: needsRebuildAfterAuth, isPresented: controller != nil
         ) else { return }
         needsRebuildAfterAuth = false
         log.info("Applying overlay rebuild deferred during auth")
@@ -361,6 +377,10 @@ struct LockOverlayView: View {
                 }
 
                 safetyStrip
+
+                if let notice = controller.secureInputNotice {
+                    warningText(notice)
+                }
 
                 if let notice = controller.tapRecoveryNotice {
                     warningText(notice)
