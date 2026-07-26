@@ -17,11 +17,17 @@ them for someone deciding whether to install the update.
      "## [x.y.z] - YYYY-MM-DD" heading just below, so the entries fall under it;
      then repoint the [Unreleased] link and add a compare-link at the bottom. -->
 
+## [2.2] - 2026-07-25
+
 ### Added
 
 - Frost now refuses to lock while another app has secure keyboard entry turned on. In that state macOS never delivers the keyboard to Frost, so the unlock shortcut could not have worked.
 - The locked overlay names Apple Watch when Watch unlock is on, including how to approve with the side button.
 - Shortcut fields can be set from the keyboard, show a focus ring, and say what a rejected combo was missing.
+
+### Changed
+
+- Frost will not unlock itself under any circumstances. If macOS interrupts input blocking and it cannot be restarted, Frost used to take the overlay down and hand the Mac back with no authentication. It now keeps the screen covered and still requires Touch ID — with an unlock button on the overlay, because the unlock shortcut stops working in that state.
 
 ### Fixed
 
@@ -149,7 +155,8 @@ Initial public release.
 - Pointer stays pinned while the screen is locked.
 - Sparkle-based automatic updates.
 
-[Unreleased]: https://github.com/Cuzeth/frost/compare/v2.1.2...HEAD
+[Unreleased]: https://github.com/Cuzeth/frost/compare/v2.2...HEAD
+[2.2]: https://github.com/Cuzeth/frost/compare/v2.1.2...v2.2
 [2.1.2]: https://github.com/Cuzeth/frost/compare/v2.1.1...v2.1.2
 [2.1.1]: https://github.com/Cuzeth/frost/compare/v2.1...v2.1.1
 [2.1]: https://github.com/Cuzeth/frost/compare/v2.0...v2.1
