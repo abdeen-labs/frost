@@ -72,10 +72,11 @@ final class EventTapManager: InputSuppressing {
     var onUnlockChord: (() -> Void)?
     /// Invoked if macOS disables the tap and Frost re-enables it.
     var onTapReenabled: ((String) -> Void)?
-    /// Invoked if macOS disables the tap and Frost CANNOT re-enable it. The lock
-    /// is then effectively broken — the unlock chord is recognized only inside
-    /// this callback, so a dead tap kills the primary unlock path — and the
-    /// controller must escalate to a visible recovery state, not a passive notice.
+    /// Invoked if macOS disables the tap and Frost CANNOT re-enable it. Input
+    /// suppression is then gone — and so is the unlock chord, which is
+    /// recognized only inside this callback. The controller does NOT unlock:
+    /// it holds the lock, keeps the overlay up, and requires authentication to
+    /// dismiss (see THE INVARIANT in LockController).
     var onTapReviveFailed: (() -> Void)?
 
     /// The shortcut that triggers unlock, recognized inside the callback while
@@ -277,8 +278,8 @@ final class EventTapManager: InputSuppressing {
     /// tapEnable returns no status, so the caller must confirm the re-enable
     /// actually took (`tapIsEnabledAfterReenable`) before reassuring the user.
     /// If it did NOT, input is no longer suppressed and the in-tap unlock
-    /// chord is dead — escalate to a visible recovery state instead of a
-    /// misleading "re-enabled" notice.
+    /// chord is dead — report that instead of a misleading "re-enabled" notice,
+    /// so the controller can hold the lock and demand authentication.
     static func tapDisabledReaction(
         type: CGEventType,
         shouldSuppress: Bool,
@@ -314,7 +315,7 @@ final class EventTapManager: InputSuppressing {
             log.error("Tap disabled by system; re-enabled")
             Task { @MainActor [weak self] in self?.onTapReenabled?(message) }
         case .reviveFailed:
-            log.fault("Tap disabled by system and re-enable FAILED; escalating to recovery")
+            log.fault("Tap disabled by system and re-enable FAILED; holding the lock, authentication required")
             Task { @MainActor [weak self] in self?.onTapReviveFailed?() }
         }
     }
