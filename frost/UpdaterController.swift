@@ -54,7 +54,10 @@ final class UpdaterController: ObservableObject {
 @MainActor
 private final class FrostUpdaterDelegate: NSObject, SPUUpdaterDelegate {
     func updater(_ updater: SPUUpdater, mayPerform updateCheck: SPUUpdateCheck) throws {
-        if LockController.shared?.isSuppressingInput == true {
+        // isHoldingLock, not isSuppressingInput: if macOS killed the tap the
+        // overlay is still up demanding authentication, and an update alert
+        // must not compete with that prompt for focus.
+        if LockController.shared?.isHoldingLock == true {
             throw NSError(
                 domain: "dev.abdeen.frost",
                 code: 1,

@@ -7,7 +7,9 @@
 //  lock programmatically — the product's core workflow is "start an
 //  unattended task, then lock the desk".
 //
-//  SAFETY: the intent can only LOCK, never unlock. It calls the same
+//  SAFETY: the intent can only LOCK, never unlock — there is deliberately no
+//  unlock intent, because nothing but authentication may release a lock. It
+//  calls the same
 //  LockController.lock() entry point as the menu item, so every preflight
 //  (Touch ID availability, Accessibility) and every recovery/escape hatch
 //  applies unchanged. If the app is already locked or in recovery, the
@@ -42,19 +44,43 @@ struct LockInputIntent: AppIntent {
         guard let lock = LockController.shared else {
             throw LockInputIntentError.notReady
         }
-        guard !lock.isLocked else {
-            return .result()   // already locked or in recovery: no-op
+        // `isHoldingLock`, not `isLocked`: the latter is also true during
+        // recovery, where the lock never started. Short-circuiting on it meant a
+        // stale recovery card from an earlier failed lock made this intent
+        // report success while the desk sat unlocked.
+        guard !lock.isHoldingLock else {
+            return .result()   // a lock is already being held: no-op
         }
         lock.lock()
+
+        // lock() is non-throwing and resolves to input-suppressed OR one of
+        // three recovery states (Touch ID unavailable, Accessibility missing,
+        // tap start failed). Returning .result() unconditionally reported
+        // success for all four. The documented usage is
+        // `shortcuts run "Lock Input"` from a script, so a caller that cannot
+        // observe the difference proceeds with an unattended task on an
+        // unlocked machine — exactly the outcome it asked to prevent.
+        guard lock.isSuppressingInput else {
+            throw LockInputIntentError.lockFailed(lock.recoveryMessage)
+        }
         return .result()
     }
 }
 
 enum LockInputIntentError: Error, CustomLocalizedStringResourceConvertible {
     case notReady
+    case lockFailed(String?)
 
     var localizedStringResource: LocalizedStringResource {
-        "Frost is still starting. Try again in a moment."
+        switch self {
+        case .notReady:
+            return "Frost is still starting. Try again in a moment."
+        case .lockFailed(let reason):
+            guard let reason else {
+                return "Frost could not lock input. Input is NOT locked."
+            }
+            return "Frost could not lock input: \(reason)"
+        }
     }
 }
 

@@ -18,42 +18,42 @@ struct OverlayCoordinatorTests {
 
     // MARK: - screenChangeAction
 
-    @Test func noWindowsIsIgnoredRegardlessOfAuthState() {
+    @Test func nothingPresentedIsIgnoredRegardlessOfAuthState() {
         #expect(
-            OverlayCoordinator.screenChangeAction(hasWindows: false, isAuthenticating: false)
+            OverlayCoordinator.screenChangeAction(isPresented: false, isAuthenticating: false)
                 == .ignore)
         #expect(
-            OverlayCoordinator.screenChangeAction(hasWindows: false, isAuthenticating: true)
+            OverlayCoordinator.screenChangeAction(isPresented: false, isAuthenticating: true)
                 == .ignore)
     }
 
-    @Test func windowsPresentAndAuthenticatingDefers() {
+    @Test func presentedAndAuthenticatingDefers() {
         #expect(
-            OverlayCoordinator.screenChangeAction(hasWindows: true, isAuthenticating: true)
+            OverlayCoordinator.screenChangeAction(isPresented: true, isAuthenticating: true)
                 == .deferUntilAuthEnds)
     }
 
-    @Test func windowsPresentAndIdleRebuildsImmediately() {
+    @Test func presentedAndIdleRebuildsImmediately() {
         #expect(
-            OverlayCoordinator.screenChangeAction(hasWindows: true, isAuthenticating: false)
+            OverlayCoordinator.screenChangeAction(isPresented: true, isAuthenticating: false)
                 == .rebuild)
     }
 
     // MARK: - shouldApplyDeferredRebuild
 
-    @Test func deferredRebuildAppliesOnlyWhenNeededAndWindowsExist() {
+    @Test func deferredRebuildAppliesOnlyWhenNeededAndStillPresented() {
         #expect(
             OverlayCoordinator.shouldApplyDeferredRebuild(
-                needsRebuildAfterAuth: true, hasWindows: true) == true)
+                needsRebuildAfterAuth: true, isPresented: true) == true)
         #expect(
             OverlayCoordinator.shouldApplyDeferredRebuild(
-                needsRebuildAfterAuth: true, hasWindows: false) == false)
+                needsRebuildAfterAuth: true, isPresented: false) == false)
         #expect(
             OverlayCoordinator.shouldApplyDeferredRebuild(
-                needsRebuildAfterAuth: false, hasWindows: true) == false)
+                needsRebuildAfterAuth: false, isPresented: true) == false)
         #expect(
             OverlayCoordinator.shouldApplyDeferredRebuild(
-                needsRebuildAfterAuth: false, hasWindows: false) == false)
+                needsRebuildAfterAuth: false, isPresented: false) == false)
     }
 
     // MARK: - activeScreenIndex

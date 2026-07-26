@@ -231,4 +231,31 @@ struct ShortcutTests {
             _ = try JSONDecoder().decode(Shortcut.self, from: json)
         }
     }
+
+    // MARK: - Key-code validation on decode
+
+    /// Frost is non-sandboxed, so any process running as the user can write
+    /// dev.abdeen.frost.plist (and it can simply be corrupt). A key code that
+    /// maps to no physical key used to decode happily, render as "⌃⌥⌘Key 999",
+    /// and never match an event — an unpressable unlock chord.
+    @Test func decodingRejectsAKeyCodeThatMapsToNoKey() throws {
+        let json = #"{"keyCode":999,"modifierFlagsRawValue":\#(Shortcut.defaultUnlock.modifierFlagsRawValue)}"#
+        let data = try #require(json.data(using: .utf8))
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode(Shortcut.self, from: data)
+        }
+    }
+
+    @Test func decodingAcceptsAResolvableKeyCode() throws {
+        let encoded = try JSONEncoder().encode(Shortcut.defaultUnlock)
+        let decoded = try JSONDecoder().decode(Shortcut.self, from: encoded)
+        #expect(decoded == Shortcut.defaultUnlock)
+    }
+
+    @Test func specialAndCharacterKeysAreResolvable() {
+        #expect(Shortcut.isResolvableKeyCode(UInt16(kVK_ANSI_U)))
+        #expect(Shortcut.isResolvableKeyCode(UInt16(kVK_Escape)))
+        #expect(Shortcut.isResolvableKeyCode(UInt16(kVK_F1)))
+        #expect(!Shortcut.isResolvableKeyCode(999))
+    }
 }

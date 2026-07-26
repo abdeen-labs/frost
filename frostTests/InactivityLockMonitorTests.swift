@@ -7,6 +7,7 @@
 //  via Touch ID does not immediately re-lock from stale global idle time.
 //
 
+import CoreGraphics
 import Foundation
 import Testing
 
@@ -164,5 +165,43 @@ final class InactivityLockMonitorTests {
 
     private func advance(by seconds: TimeInterval) {
         now = now.addingTimeInterval(seconds)
+    }
+
+    // MARK: - Poll lifecycle
+
+    /// The loop must exist only when auto-lock is actually on. It used to run
+    /// unconditionally for the life of the process, waking the main thread every
+    /// 5 seconds to hit poll()'s threshold guard and return — with auto-lock Off
+    /// being the default.
+    @Test func pollLoopRunsOnlyWhileAutoLockIsEnabled() async {
+        let settings = SettingsStore(defaults: defaults)
+        let monitor = InactivityLockMonitor(
+            now: { Date() },
+            idleSeconds: { 0 }
+        )
+        defer { monitor.stop() }
+
+        monitor.start(settings: settings, isLocked: { false }, lock: {})
+        #expect(monitor.isPolling == false)   // default is .off
+
+        settings.inactivityLock = .thirtySeconds
+        await Task.yield()
+        #expect(monitor.isPolling == true)
+
+        settings.inactivityLock = .off
+        await Task.yield()
+        #expect(monitor.isPolling == false)
+    }
+
+    // MARK: - The kCGAnyInputEventType sentinel
+
+    /// `CGEventSource.secondsSinceLastEventType` reads only the RAW value, and
+    /// the sentinel for "any input" is 0xFFFFFFFF. Swift happens to name that
+    /// case `.tapDisabledByUserInput`, which invites a "simplification" to
+    /// `.null` (raw 0) — measuring idle time since the last null event, which
+    /// real typing never resets. Auto-lock would then fire while the user works.
+    @Test func anyInputEventTypeIsTheAnyInputSentinelNotNull() {
+        #expect(InactivityLockMonitor.anyInputEventType.rawValue == 0xFFFF_FFFF)
+        #expect(InactivityLockMonitor.anyInputEventType.rawValue != CGEventType.null.rawValue)
     }
 }

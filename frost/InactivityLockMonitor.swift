@@ -6,6 +6,7 @@
 //  lock path when the selected inactivity threshold is exceeded.
 //
 
+import Combine
 import CoreGraphics
 import Foundation
 import os
@@ -26,6 +27,10 @@ final class InactivityLockMonitor: InactivityMonitoring {
     private var isLocked: (() -> Bool)?
     private var lockAction: (() -> Void)?
     private var pollTask: Task<Void, Never>?
+    /// Remembered from `start()` so the settings-driven restart honours the
+    /// test seam that suppresses automatic polling.
+    private var pollAutomatically = true
+    private var inactivitySettingCancellable: AnyCancellable?
     private var snoozedUntil: Date?
     private var baselineDate: Date?
     private var observedInactivityLock: InactivityLockOption?
@@ -45,7 +50,12 @@ final class InactivityLockMonitor: InactivityMonitoring {
     /// case `.tapDisabledByUserInput`. Do NOT "simplify" this back to `.null`
     /// (raw value 0): that measures idle time since the last *null* event, which
     /// real input never resets, so auto-lock would misfire.
-    nonisolated private static var anyInputEventType: CGEventType {
+    /// Internal, not private, so the sentinel carrying the "do NOT simplify
+    /// this back to `.null`" warning is covered by a test: making that exact
+    /// mistake measures idle time since the last *null* event, which real input
+    /// never resets, so Frost would auto-lock mid-work at the threshold
+    /// regardless of activity.
+    nonisolated static var anyInputEventType: CGEventType {
         CGEventType(rawValue: ~0)!
     }
 
@@ -80,14 +90,40 @@ final class InactivityLockMonitor: InactivityMonitoring {
         self.settings = settings
         self.isLocked = isLocked
         self.lockAction = lock
+        self.pollAutomatically = pollAutomatically
         observedInactivityLock = settings.inactivityLock
         resetIdleBaseline()
         pollTask?.cancel()
+        pollTask = nil
+
+        // Drive the loop from the setting instead of running it unconditionally.
+        // With auto-lock Off — the default — poll() bailed at the threshold
+        // guard anyway, so the old loop woke the main thread every 5 seconds for
+        // the whole life of the process to do nothing.
+        inactivitySettingCancellable = settings.$inactivityLock
+            .sink { [weak self] option in
+                Task { @MainActor in self?.applyPollingState(for: option) }
+            }
+        applyPollingState(for: settings.inactivityLock)
+    }
+
+    /// Start or stop the poll loop to match the current setting.
+    private func applyPollingState(for option: InactivityLockOption) {
         guard pollAutomatically else {
+            pollTask?.cancel()
             pollTask = nil
             return
         }
+        guard option != .off else {
+            pollTask?.cancel()
+            pollTask = nil
+            return
+        }
+        guard pollTask == nil else { return }
+        startPolling()
+    }
 
+    private func startPolling() {
         pollTask = Task { @MainActor [weak self] in
             let interval = self?.pollIntervalSeconds ?? 5
             while !Task.isCancelled {
@@ -98,7 +134,14 @@ final class InactivityLockMonitor: InactivityMonitoring {
         }
     }
 
+    /// True when the poll loop has anything to do. With auto-lock Off — the
+    /// default — poll() bails immediately at the threshold guard, so the loop
+    /// was waking the main thread every 5 seconds for the app's entire lifetime
+    /// to do nothing, defeating timer coalescing and App Nap for the session.
+    var isPolling: Bool { pollTask != nil }
+
     func stop() {
+        inactivitySettingCancellable = nil
         pollTask?.cancel()
         pollTask = nil
     }

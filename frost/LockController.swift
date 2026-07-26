@@ -6,11 +6,25 @@
 //  EventTapManager, OverlayCoordinator, and UnlockCoordinator together and owns
 //  the state machine + the DEBUG auto-unlock safety net.
 //
-//  SAFETY: independent ways out of a lock:
-//    1. The unlock chord (⌃⌥⌘U) → Touch ID.
-//    2. The DEBUG auto-unlock timer (debug builds only).
-//    3. Sending SIGTERM (e.g. `pkill -x frost` / `kill` over SSH) — caught
-//       below and torn down cleanly, independent of app state.
+//  THE INVARIANT: Frost never releases a held lock without a successful
+//  LAContext evaluation. Not on repeated failures, not on biometry lockout, not
+//  when the sensor disconnects, not when macOS kills the event tap, not on any
+//  timer or heuristic. There is no way to tell an owner who locked themselves
+//  out from someone else at the keyboard, and Frost does not guess. A hard
+//  power-off is an acceptable outcome; a self-unlock is not. See AGENTS.md.
+//
+//  Ways a lock ends:
+//    1. The unlock chord (⌃⌥⌘U) → Touch ID → success. The only in-app route.
+//       If macOS kills the tap the chord dies with it, and the overlay's
+//       authenticate button becomes the only route — still through Touch ID.
+//    2. Process death: SIGTERM (e.g. `pkill -x frost` over SSH), or power-off.
+//       Not an unlock — the app is gone; teardown just avoids leaving the
+//       cursor decoupled.
+//    3. The DEBUG auto-unlock timer, compiled out of release builds, so a
+//       developer cannot trap themselves. Never ships.
+//
+//  Refusing to START a lock is different and always allowed: a preflight
+//  failure means no input was ever taken.
 //
 
 import AppKit
@@ -36,6 +50,10 @@ struct RecoveryState: Equatable {
 final class LockController: ObservableObject {
     @Published private(set) var state: LockState = .unlocked
     @Published private(set) var tapRecoveryNotice: String?
+    /// Set while secure event input is held by another process during a lock.
+    /// Kept separate from `tapRecoveryNotice` so the two warnings can coexist
+    /// and neither clears the other.
+    @Published private(set) var secureInputNotice: String?
     #if DEBUG
     @Published private(set) var debugSecondsRemaining: Int?
     #endif
@@ -67,6 +85,10 @@ final class LockController: ObservableObject {
     /// Internal get so state-machine tests can await the in-flight evaluation.
     private(set) var authenticationTask: Task<Void, Never>?
 
+    /// How often to re-check secure event input while locked.
+    private let secureInputPollSeconds: Double = 2
+    private var secureInputWatchTask: Task<Void, Never>?
+
     #if DEBUG
     /// DEBUG-only: the lock always tears down after this many seconds, no matter
     /// what. Never compiled into release builds.
@@ -75,10 +97,23 @@ final class LockController: ObservableObject {
     #endif
 
     var isLocked: Bool { state != .unlocked }
-    /// True only while input is genuinely suppressed. Distinct from `isLocked`,
-    /// which includes recovery — where input is explicitly NOT locked and the
-    /// menu bar must not claim otherwise.
-    var isSuppressingInput: Bool { state == .locked || state == .authenticating }
+    /// True while Frost is HOLDING a lock — the overlay is up and it will not
+    /// release the machine without authentication. Recovery is excluded: there
+    /// the lock never started and input was never taken.
+    ///
+    /// Distinct from `isSuppressingInput`, because those two can disagree: if
+    /// macOS kills the event tap and it cannot be revived, Frost is still
+    /// holding the lock (overlay up, Touch ID required) while no longer
+    /// suppressing anything.
+    var isHoldingLock: Bool { state == .locked || state == .authenticating }
+    /// True only while input is genuinely suppressed, so nothing in the UI
+    /// claims input is blocked when it is not.
+    var isSuppressingInput: Bool { isHoldingLock && !inputSuppressionFailed }
+    /// Set when macOS disabled input blocking and Frost could not restore it.
+    /// The lock is still held and still requires authentication; only the
+    /// suppression is gone. The unlock chord is dead with the tap, so the
+    /// overlay must offer a clickable way to reach the prompt.
+    @Published private(set) var inputSuppressionFailed = false
     /// True while a Touch ID evaluation is live. The overlay reads this to avoid
     /// rebuilding (and thereby churning window focus) while the prompt is up.
     var isAuthenticating: Bool { state == .authenticating }
@@ -90,6 +125,21 @@ final class LockController: ObservableObject {
     var unlockShortcutSpoken: String { settings.unlockShortcut.spokenString }
     /// Optional owner-supplied message shown on the locked overlay (empty = none).
     var lockMessage: String { settings.lockMessage }
+    /// True when the user opted in to Apple Watch unlock. With it on, a Mac with
+    /// no Touch ID sensor at all can enter a lock (the preflight accepts a paired
+    /// Watch instead), so the overlay must not name Touch ID as the only way out.
+    var allowsWatchUnlock: Bool { settings.allowWatchUnlock }
+    /// How the overlay should name the unlock method it is asking for.
+    var unlockMethodLabel: String {
+        settings.allowWatchUnlock ? "Touch ID or Apple Watch" : "Touch ID"
+    }
+    /// The current recovery message, if a recovery overlay is showing. Lets a
+    /// non-visual caller (the Lock Input intent) report WHY a lock did not
+    /// happen instead of failing opaquely.
+    var recoveryMessage: String? {
+        guard case .recovery(let recovery) = state else { return nil }
+        return recovery.message
+    }
 
     /// Collaborators default (nil) to the real implementations, constructed in
     /// the body because default-argument expressions are nonisolated and the
@@ -167,6 +217,13 @@ final class LockController: ObservableObject {
         let currentlyTrusted = permissions.hasAccessibility()
         if !currentlyTrusted {
             accessibilityRequiresRelaunch = true
+        } else if accessibilityTrustedAtLaunch {
+            // Trust is back AND this process had a usable grant at launch, so
+            // the tap and the global monitor still work — nothing needs a
+            // relaunch. Without this the latch was one-way: toggling Frost off
+            // and back on in System Settings (exactly what a user does while
+            // troubleshooting) permanently killed the lock hotkey, silently.
+            accessibilityRequiresRelaunch = false
         }
 
         guard accessibilityTrustedAtLaunch,
@@ -218,9 +275,25 @@ final class LockController: ObservableObject {
             break
         case .unavailable(let message, let allowsRetry):
             enterRecovery(RecoveryState(
-                title: "Touch ID Required",
+                title: "\(unlockMethodLabel) Required",
                 message: message,
                 allowsRetry: allowsRetry
+            ))
+            return
+        }
+
+        // Secure event input steals keyboard events from session-level taps, so
+        // the tap would be created, the pointer frozen and ⌘Tab/Force Quit
+        // disabled — while the in-tap unlock chord could never fire. Refuse the
+        // lock rather than enter one with no in-app way out.
+        guard !permissions.isSecureInputActive() else {
+            enterRecovery(RecoveryState(
+                message: """
+                Another app has secure keyboard entry turned on, so Frost can't \
+                see the keyboard — including your unlock shortcut. Close any \
+                open password field or password-manager window and try again. \
+                Input is NOT locked.
+                """
             ))
             return
         }
@@ -265,11 +338,26 @@ final class LockController: ObservableObject {
             return
         }
 
-        overlay.present(controller: self, level: .screenSaver)
+        // No overlay window means no on-screen explanation, no unlock-shortcut
+        // hint and no warning surface — an invisible lock. Back the tap out
+        // rather than suppress input behind nothing.
+        guard overlay.present(controller: self, level: .screenSaver) else {
+            overlay.dismiss()
+            tap.stop()
+            stopDebugAutoUnlock()
+            enterRecovery(RecoveryState(
+                message: """
+                Frost couldn't put its overlay on any display, so it did not \
+                lock input. Try again once your displays have settled.
+                """
+            ))
+            return
+        }
         kiosk.enterKioskMode()
         sleep.apply(preventScreenSaver: settings.preventScreenSaver,
                     preventSleep: settings.preventSleep)
         tapRecoveryNotice = nil
+        startSecureInputWatch()
         state = .locked
 
         // Optionally open Touch ID right away instead of waiting for the unlock
@@ -290,6 +378,14 @@ final class LockController: ObservableObject {
     func requestUnlock() {
         guard state == .locked else { return }
         armAuthentication()
+    }
+
+    /// The overlay's authenticate button. Identical to the unlock chord, but
+    /// reachable when the chord is not: if macOS killed the tap, the chord was
+    /// recognized inside it and is gone, so this is the only way back to the
+    /// prompt short of a remote kill.
+    func authenticateFromOverlay() {
+        requestUnlock()
     }
 
     /// Flips into the authenticating state, lets Esc through, and presents the
@@ -317,6 +413,14 @@ final class LockController: ObservableObject {
 
         authenticationTask = Task { [weak self] in
             guard let self else { return }
+            // Re-check BEFORE the suspension point. This task is created
+            // synchronously but its body doesn't start until the main actor
+            // yields, so teardown() — from the tap-revive failure, the SIGTERM
+            // handler, or the DEBUG timer — can run first. Its unlocker.cancel()
+            // is a no-op then (no context exists yet), so without this the
+            // evaluation would still start and raise a Touch ID prompt after the
+            // lock was already gone.
+            guard !Task.isCancelled, self.state == .authenticating else { return }
             let result = await self.unlocker.authenticate(reason: "Unlock Frost")
             if Task.isCancelled { return }
             self.authenticationTask = nil
@@ -361,22 +465,34 @@ final class LockController: ObservableObject {
         log.info("Unlocked")
     }
 
-    /// macOS disabled the event tap and it could not be re-enabled while locked,
-    /// so input is no longer suppressed and the in-tap unlock chord is dead.
-    /// Restore everything and escalate to a prominent recovery overlay — whose
-    /// buttons are clickable now that the pointer is live again — rather than
-    /// leaving the user behind a passive notice that falsely implies success.
+    /// macOS disabled the event tap and it could not be re-enabled while locked.
+    /// Input is flowing again — macOS did that, not Frost, and Frost cannot stop
+    /// it — and the in-tap unlock chord is dead with the tap.
+    ///
+    /// Frost does NOT unlock here. It never returns the machine without
+    /// authentication, under any circumstances: there is no way to tell a user
+    /// who locked themselves out from someone else at the keyboard, and Frost
+    /// will not make that judgement. So the lock is HELD: the overlay stays up,
+    /// kiosk presentation stays on, and only Touch ID takes it down.
+    ///
+    /// Two things do have to change. The dead tap is cleaned up — which also
+    /// re-couples the mouse, since the cursor was decoupled by `start()` and
+    /// stays decoupled even after the tap dies; without that the pointer is
+    /// frozen and the user could not reach the authenticate button. And the
+    /// overlay must offer that button, because the chord is no longer heard.
     private func handleTapReviveFailure() {
-        guard state == .locked || state == .authenticating else { return }
-        log.fault("Event tap could not be re-enabled; unlocking and showing recovery")
-        teardown()
-        enterRecovery(RecoveryState(
-            message: """
-            macOS stopped Frost's input blocking and it could not be restored, \
-            so input has been unlocked. Press Try Again to re-lock, or Dismiss \
-            to stay unlocked.
+        guard isHoldingLock, !inputSuppressionFailed else { return }
+        log.fault("Event tap could not be re-enabled; holding the lock and requiring authentication")
+
+        // Releases the dead tap and restores cursor association. Deliberately
+        // NOT teardown(): the overlay, kiosk options and lock state all stay.
+        tap.stop()
+        inputSuppressionFailed = true
+        tapRecoveryNotice = """
+            macOS stopped Frost from blocking input and it could not be \
+            restarted, so the keyboard and pointer are live again. Frost will \
+            not unlock without \(unlockMethodLabel).
             """
-        ))
     }
 
     // MARK: - Recovery
@@ -401,11 +517,29 @@ final class LockController: ObservableObject {
         teardown()
     }
 
+    /// Open the Accessibility pane, and only then tear the recovery card down.
+    /// The old order dismissed first and discarded `open`'s result, so if the
+    /// legacy pane URL ever stops resolving the user's card vanished, nothing
+    /// opened, and — with the menu-bar icon hidden — Frost had no UI left at all.
     func openAccessibilitySettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            dismissRecovery()
-            NSWorkspace.shared.open(url)
+        guard case .recovery(let recovery) = state else { return }
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"),
+              NSWorkspace.shared.open(url)
+        else {
+            log.error("Could not open the Accessibility settings pane")
+            state = .recovery(RecoveryState(
+                title: recovery.title,
+                message: """
+                    Frost couldn't open System Settings. Open it yourself and \
+                    enable Frost under Privacy & Security → Accessibility, then \
+                    choose Quit & Reopen. Input is NOT locked.
+                    """,
+                showsAccessibilitySettings: recovery.showsAccessibilitySettings,
+                allowsRetry: recovery.allowsRetry
+            ))
+            return
         }
+        dismissRecovery()
     }
 
     /// Quit and reopen in one action: a fresh Accessibility grant usually isn't
@@ -415,24 +549,69 @@ final class LockController: ObservableObject {
     /// relaunch fails, Frost stays running rather than stranding the user with
     /// nothing.
     func quitAndReopenFrost() {
-        if case .recovery = state {
-            teardown()
+        // Recovery only. The button is rendered only on the recovery card, but
+        // this path ends in teardown() + terminate, so the restriction is
+        // enforced here rather than left to depend on the UI: quitting out of a
+        // HELD lock would release the machine without authentication.
+        guard case .recovery(let previousRecovery) = state else {
+            log.error("quitAndReopenFrost called outside recovery; ignoring")
+            return
         }
+
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.createsNewApplicationInstance = true
+        // Tell the new instance it was launched by this flow so it opens
+        // Settings. A plain launch deliberately shows nothing (so login stays
+        // silent), which left this action — the documented exit from the
+        // Accessibility dead end — relaunching into an invisible app at exactly
+        // the moment the user needs confirmation the new grant took effect.
+        configuration.arguments = [Self.showSettingsLaunchArgument]
         NSWorkspace.shared.openApplication(
             at: Bundle.main.bundleURL,
             configuration: configuration
         ) { _, error in
-            guard error == nil else { return }
-            Task { @MainActor in NSApp.terminate(nil) }
+            // The weak capture belongs to the Task, not the outer completion
+            // handler: capturing it out there makes `self` a captured var that
+            // the concurrently-executing Task body then reads, which is an error
+            // in the Swift 6 language mode.
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                guard error == nil else {
+                    // Keep the user where they were rather than silently doing
+                    // nothing: the old code returned here having ALREADY torn
+                    // the recovery card down.
+                    self.log.error("Relaunch failed; staying alive")
+                    self.state = .recovery(RecoveryState(
+                        title: previousRecovery.title,
+                        message: """
+                            Frost couldn't relaunch itself. Quit Frost from the \
+                            menu bar and open it again so the new permission \
+                            takes effect. Input is NOT locked.
+                            """,
+                        showsAccessibilitySettings: previousRecovery.showsAccessibilitySettings,
+                        allowsRetry: previousRecovery.allowsRetry
+                    ))
+                    return
+                }
+                // Only now is the replacement definitely running. This path is
+                // reachable only from recovery, where input is NOT suppressed —
+                // it never releases a live lock. See `teardown`'s contract.
+                self.teardown()
+                NSApp.terminate(nil)
+            }
         }
     }
+
+    /// Launch argument that asks a freshly-launched Frost to open Settings.
+    /// Only `quitAndReopenFrost` passes it, so a login-item launch stays silent.
+    static let showSettingsLaunchArgument = "--show-settings"
 
     // MARK: - Teardown
 
     private func teardown() {
         stopDebugAutoUnlock()
+        stopSecureInputWatch()
+        inputSuppressionFailed = false
         kiosk.exitKioskMode()
         sleep.releaseAll()
         tap.stop()
@@ -455,6 +634,53 @@ final class LockController: ObservableObject {
         guard state != .unlocked else { return }
         log.notice("Termination while active; running teardown backstop")
         teardown()
+    }
+
+    // MARK: - Secure input watch
+
+    /// Secure event input can also be turned on AFTER a lock begins, which kills
+    /// the in-tap unlock chord mid-session. Watch for it and say so on the
+    /// overlay.
+    ///
+    /// This deliberately WARNS rather than tearing the lock down the way
+    /// `handleTapReviveFailure` does. Auto-unlocking on this signal would mean a
+    /// false positive silently unlocks an unattended Mac — the worst failure
+    /// this app has — and the system authentication prompt may itself hold
+    /// secure input while it is up. The check is therefore skipped outside the
+    /// idle locked state, and the response is a visible warning naming the
+    /// remote-kill route that still works.
+    ///
+    /// NEEDS HARDWARE VERIFICATION: confirm whether the LocalAuthentication
+    /// prompt toggles secure input on this OS before considering escalation.
+    private func startSecureInputWatch() {
+        secureInputWatchTask?.cancel()
+        secureInputNotice = nil
+        // Read the interval up front: referring to it inside the concurrently
+        // executing task body would need an explicit `self`, which the weak
+        // capture cannot provide before the nil-check.
+        let interval = secureInputPollSeconds
+        secureInputWatchTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(interval))
+                if Task.isCancelled { return }
+                guard let self else { return }
+                // Only from the idle locked state — see the note above.
+                guard self.state == .locked else { continue }
+                self.secureInputNotice = self.permissions.isSecureInputActive()
+                    ? """
+                      Another app turned on secure keyboard entry, so \
+                      \(self.settings.unlockShortcut.displayString) may not reach Frost. \
+                      If it doesn't work, run `pkill -x frost` over SSH from another device.
+                      """
+                    : nil
+            }
+        }
+    }
+
+    private func stopSecureInputWatch() {
+        secureInputWatchTask?.cancel()
+        secureInputWatchTask = nil
+        secureInputNotice = nil
     }
 
     // MARK: - DEBUG auto-unlock safety net

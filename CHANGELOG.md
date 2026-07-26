@@ -17,6 +17,33 @@ them for someone deciding whether to install the update.
      "## [x.y.z] - YYYY-MM-DD" heading just below, so the entries fall under it;
      then repoint the [Unreleased] link and add a compare-link at the bottom. -->
 
+## [2.2] - 2026-07-25
+
+### Added
+
+- Frost now refuses to lock while another app has secure keyboard entry turned on. In that state macOS never delivers the keyboard to Frost, so the unlock shortcut could not have worked.
+- The locked overlay names Apple Watch when Watch unlock is on, including how to approve with the side button.
+- Shortcut fields can be set from the keyboard, show a focus ring, and say what a rejected combo was missing.
+
+### Changed
+
+- Frost will not unlock itself under any circumstances. If macOS interrupts input blocking and it cannot be restarted, Frost used to take the overlay down and hand the Mac back with no authentication. It now keeps the screen covered and still requires Touch ID — with an unlock button on the overlay, because the unlock shortcut stops working in that state.
+
+### Fixed
+
+- The locked overlay is readable with Reduce Transparency turned on in Light Mode, where it previously showed dark text on a dark card.
+- The overlay's panels, borders, and status pills are visible in Light Mode instead of fading into the background.
+- A long overlay message can no longer push the unlock-shortcut hint off the screen.
+- Recording a lock shortcut that matches the unlock shortcut no longer deletes the lock shortcut you already had.
+- The Launch at login switch stays on after registering when macOS still wants approval in Login Items.
+- Recovery buttons follow macOS order, so the rightmost button is no longer Dismiss.
+- The recovery overlay no longer swallows clicks meant for the apps underneath it, which it did while telling you input was not locked.
+- Quit & Reopen Frost now opens Settings after relaunching, and keeps Frost running if the relaunch fails.
+- The Lock Input shortcuts action now reports an error when the lock did not happen, instead of reporting success.
+- Frost recovers if a display change momentarily leaves it with no screen to draw the overlay on.
+- A disconnected Touch ID keyboard or unavailable Apple Watch is reported as such, instead of "Touch ID didn't match".
+- Auto-lock no longer wakes the app every few seconds when it is turned off.
+
 ## [2.1.2] - 2026-07-07
 
 ### Fixed
@@ -112,14 +139,24 @@ Initial public release.
 
 ### Added
 
-- Input lock that blocks keyboard, mouse, and kiosk gestures, cancelable with Esc.
-- Touch ID unlock (biometrics-only) with multi-display support and a password fallback.
+- Input lock that blocks keyboard, mouse, and kiosk gestures.
+- Touch ID unlock (biometrics-only) with multi-display support.
+
+<!-- Corrected after publication: this section originally claimed the lock was
+     "cancelable with Esc" and that Touch ID had "a password fallback". Neither
+     was ever true. Esc only cancels the Touch ID PROMPT and returns to the idle
+     locked state; it never ends a lock. And Frost evaluates the biometrics-only
+     policy with an empty localizedFallbackTitle, so no password button exists.
+     These sections ship verbatim as GitHub release notes and Sparkle update
+     descriptions, so a trapped user could have hammered Esc expecting release
+     and looked for a password box that is not there. -->
 - Menu-bar agent with a configurable lock/unlock shortcut and power toggles.
 - Settings window for lock/unlock shortcuts, auto-lock durations, auto-start Touch ID, and menu-bar visibility.
 - Pointer stays pinned while the screen is locked.
 - Sparkle-based automatic updates.
 
-[Unreleased]: https://github.com/Cuzeth/frost/compare/v2.1.2...HEAD
+[Unreleased]: https://github.com/Cuzeth/frost/compare/v2.2...HEAD
+[2.2]: https://github.com/Cuzeth/frost/compare/v2.1.2...v2.2
 [2.1.2]: https://github.com/Cuzeth/frost/compare/v2.1.1...v2.1.2
 [2.1.1]: https://github.com/Cuzeth/frost/compare/v2.1...v2.1.1
 [2.1]: https://github.com/Cuzeth/frost/compare/v2.0...v2.1

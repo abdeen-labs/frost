@@ -48,6 +48,21 @@ struct Shortcut: Codable, Equatable {
                 debugDescription: "Shortcut requires at least one of ⌃⌥⌘"
             )
         }
+        // The key code needs the same treatment as the modifiers, and for the
+        // same reason. Frost is non-sandboxed, so any process running as the
+        // user can write ~/Library/Preferences/dev.abdeen.frost.plist (and it
+        // can simply be corrupt). A stored key code that maps to no physical key
+        // decodes happily, renders as "⌃⌥⌘Key 999" on the overlay, and can never
+        // match an event — so with auto-lock on, the next launch locks input
+        // behind an unpressable chord. Throwing here makes SettingsStore.read
+        // return nil and fall back to `.defaultUnlock`.
+        guard Self.isResolvableKeyCode(keyCode) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .keyCode,
+                in: container,
+                debugDescription: "Key code \(keyCode) does not map to a key on this layout"
+            )
+        }
         self.init(keyCode: keyCode, modifierFlags: flags)
     }
 
@@ -111,6 +126,15 @@ struct Shortcut: Codable, Equatable {
         if modifierFlags.contains(.command) { parts.append("Command") }
         parts.append(Self.keyName(for: keyCode))
         return parts.joined(separator: " ")
+    }
+
+    /// True when the key code names a key Frost can render and match: either a
+    /// known special key, or one that produces a character on the current
+    /// layout. Internal so the decode guard is directly testable.
+    static func isResolvableKeyCode(_ keyCode: UInt16) -> Bool {
+        if specialKeyNames[Int(keyCode)] != nil { return true }
+        if let character = character(forKeyCode: keyCode), !character.isEmpty { return true }
+        return false
     }
 
     static func keyName(for keyCode: UInt16) -> String {

@@ -28,6 +28,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Deliberately open nothing here — a login launch must stay silent.
         //
+        // The one exception is a relaunch started by "Quit & Reopen Frost",
+        // which passes an explicit argument. That flow exists to make a fresh
+        // Accessibility grant usable, and it is the moment the user most needs
+        // to see that the relaunch worked; without this it relaunched into an
+        // invisible app (and, with the menu-bar icon hidden, no UI at all).
+        // A login item never passes the argument, so boot stays silent.
+        if CommandLine.arguments.contains(LockController.showSettingsLaunchArgument) {
+            SettingsWindowController.shared.show()
+        }
+
         // Defer past the current run-loop turn so a reopen event delivered in
         // this same launch batch (the system relaunching Frost at login) is
         // still seen as "mid-launch" by the reopen handler and ignored. Genuine

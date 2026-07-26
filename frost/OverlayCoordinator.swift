@@ -24,7 +24,8 @@ import SwiftUI
 /// can be tested without creating real NSWindows on every display.
 @MainActor
 protocol OverlayPresenting: AnyObject {
-    func present(controller: LockController, level: NSWindow.Level)
+    @discardableResult
+    func present(controller: LockController, level: NSWindow.Level) -> Bool
     func focusAuthenticationWindow()
     func dismiss()
     func rebuildIfDeferred()
@@ -58,7 +59,11 @@ final class OverlayCoordinator: NSObject, OverlayPresenting {
         }
     }
 
-    func present(controller: LockController, level: NSWindow.Level = .screenSaver) {
+    /// Returns false when no overlay window could be created (no screens), so
+    /// the caller can refuse to enter a lock that would suppress input with
+    /// nothing on screen to explain it.
+    @discardableResult
+    func present(controller: LockController, level: NSWindow.Level = .screenSaver) -> Bool {
         self.controller = controller
         self.level = level
         rebuild()
@@ -71,6 +76,7 @@ final class OverlayCoordinator: NSObject, OverlayPresenting {
             object: nil)
         show()
         log.info("Overlay presented on \(self.windows.count, privacy: .public) display(s)")
+        return !windows.isEmpty
     }
 
     private func show() {
@@ -91,9 +97,13 @@ final class OverlayCoordinator: NSObject, OverlayPresenting {
     /// system Touch ID prompt take focus — with the active-display window keyed so
     /// the prompt is biased onto the display where the lock was triggered.
     func focusAuthenticationWindow() {
+        // Activate FIRST, before the empty-window bail-out. Frost is an
+        // LSUIElement agent, so without this the system authentication prompt
+        // cannot take focus — and an empty window set is exactly when the user
+        // has no other affordance left.
+        NSApp.activate(ignoringOtherApps: true)
         guard !windows.isEmpty else { return }
         let keyIndex = min(max(authenticationWindowIndex, 0), windows.count - 1)
-        NSApp.activate(ignoringOtherApps: true)
         windows[keyIndex].makeKeyAndOrderFront(nil)
     }
 
@@ -110,18 +120,24 @@ final class OverlayCoordinator: NSObject, OverlayPresenting {
     /// What a screen-parameters change should do. Pure: rebuilding mid-auth
     /// churns focus out from under the live Touch ID prompt, so it must defer.
     enum ScreenChangeAction: Equatable {
-        case ignore              // no windows: nothing presented, nothing to do
+        case ignore              // nothing presented at all: nothing to do
         case deferUntilAuthEnds  // live Touch ID prompt: rebuild later
         case rebuild
     }
 
-    static func screenChangeAction(hasWindows: Bool, isAuthenticating: Bool) -> ScreenChangeAction {
-        guard hasWindows else { return .ignore }
+    /// Keyed on whether a controller is still PRESENTED, not on whether windows
+    /// currently exist. `rebuild()` repopulates from `NSScreen.screens`, so a
+    /// display reconfiguration that momentarily reports zero screens leaves the
+    /// window set empty — and keying on `hasWindows` made that state permanent:
+    /// every later screen change took `.ignore`, so the overlay never came back
+    /// while the tap kept suppressing input with nothing on screen.
+    static func screenChangeAction(isPresented: Bool, isAuthenticating: Bool) -> ScreenChangeAction {
+        guard isPresented else { return .ignore }
         return isAuthenticating ? .deferUntilAuthEnds : .rebuild
     }
 
-    static func shouldApplyDeferredRebuild(needsRebuildAfterAuth: Bool, hasWindows: Bool) -> Bool {
-        needsRebuildAfterAuth && hasWindows
+    static func shouldApplyDeferredRebuild(needsRebuildAfterAuth: Bool, isPresented: Bool) -> Bool {
+        needsRebuildAfterAuth && isPresented
     }
 
     @objc private func screenParametersChanged() {
@@ -131,7 +147,7 @@ final class OverlayCoordinator: NSObject, OverlayPresenting {
         // (after idle) both fire this notification right when the first prompt is
         // up. Defer the rebuild until authentication ends.
         switch Self.screenChangeAction(
-            hasWindows: !windows.isEmpty, isAuthenticating: controller?.isAuthenticating == true
+            isPresented: controller != nil, isAuthenticating: controller?.isAuthenticating == true
         ) {
         case .ignore:
             return
@@ -150,7 +166,7 @@ final class OverlayCoordinator: NSObject, OverlayPresenting {
     /// change that happened while the prompt was up.
     func rebuildIfDeferred() {
         guard Self.shouldApplyDeferredRebuild(
-            needsRebuildAfterAuth: needsRebuildAfterAuth, hasWindows: !windows.isEmpty
+            needsRebuildAfterAuth: needsRebuildAfterAuth, isPresented: controller != nil
         ) else { return }
         needsRebuildAfterAuth = false
         log.info("Applying overlay rebuild deferred during auth")
@@ -246,13 +262,26 @@ struct LockOverlayView: View {
                 280,
                 proxy.size.width - safeAreaInsets.leading - safeAreaInsets.trailing - 32
             )
+            let availableHeight = max(
+                200,
+                proxy.size.height - safeAreaInsets.top - safeAreaInsets.bottom - 32
+            )
 
             ZStack {
                 // A stronger scrim (paired with an opaque card) when the user has
                 // asked to reduce transparency, so text stays legible over a busy
                 // desktop showing through.
-                Color.black.opacity(reduceTransparency ? 0.6 : 0.35).ignoresSafeArea()
-                card(maxWidth: availableWidth)
+                //
+                // In recovery, input is NOT locked and the card says so — but the
+                // scrim is a full-screen hit-testable surface on every display and
+                // every Space, so without this every click outside the card would
+                // land here and do nothing, contradicting the card's own message.
+                // Clicks fall through to the app underneath instead; the card's
+                // own buttons keep working because they sit above this layer.
+                Color.black.opacity(reduceTransparency ? 0.6 : 0.35)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(!isRecovery)
+                card(maxWidth: availableWidth, maxHeight: availableHeight)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding(safeAreaInsets)
             }
@@ -260,16 +289,38 @@ struct LockOverlayView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    @ViewBuilder private func card(maxWidth: CGFloat) -> some View {
+    private var isRecovery: Bool {
+        if case .recovery = controller.state { return true }
+        return false
+    }
+
+    @ViewBuilder private func card(maxWidth: CGFloat, maxHeight: CGFloat) -> some View {
         switch controller.state {
         case .recovery(let recovery):
             recoveryCard(recovery, width: min(cardWidth + 10, maxWidth))
+                .frame(maxHeight: maxHeight)
         default:
             lockedCard(width: min(cardWidth, maxWidth))
+                .frame(maxHeight: maxHeight)
         }
     }
 
     private var authenticating: Bool { controller.state == .authenticating }
+
+    /// With Watch unlock enabled the preflight accepts a paired Watch instead of
+    /// a fingerprint, so a Mac with no Touch ID sensor at all can be locked.
+    /// Naming Touch ID exclusively would leave that user staring at a fingerprint
+    /// glyph with no idea the Watch side-button double-press is what dismisses
+    /// the system dialog.
+    private var authenticationSymbol: String {
+        controller.allowsWatchUnlock ? "applewatch" : "touchid"
+    }
+
+    private var authenticationInstruction: String {
+        controller.allowsWatchUnlock
+            ? "Respond with Touch ID, or double-press your Apple Watch side button. Press Esc to cancel and keep input locked."
+            : "Respond to the Touch ID prompt. Press Esc to cancel and keep input locked."
+    }
 
     private func lockedCard(width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -280,7 +331,7 @@ struct LockOverlayView: View {
                     Text(authenticating ? "Authenticate" : "Input Locked")
                         .font(.title2.weight(.semibold))
                     Text(authenticating
-                         ? "Touch ID"
+                         ? controller.unlockMethodLabel
                          : "Keyboard, mouse, and trackpad input are paused")
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -307,13 +358,45 @@ struct LockOverlayView: View {
                 }
 
                 if !controller.lockMessage.isEmpty {
+                    // Capped deliberately. The message is owner-supplied free
+                    // text and everything below it here — the safety strip, the
+                    // tap-recovery warning, the DEBUG countdown — plus the
+                    // unlock-shortcut hint above it are the affordances the user
+                    // needs while input is suppressed. An uncapped message grows
+                    // the centred card past both screen edges and pushes them out
+                    // of view, and a locked user cannot scroll it back (scroll
+                    // events are swallowed) or reach another app (Force Quit is
+                    // disabled). Truncating the message is the recoverable
+                    // failure; losing the unlock hint is not.
                     Text(controller.lockMessage)
                         .font(.callout.weight(.medium))
                         .multilineTextAlignment(.center)
+                        .lineLimit(6)
+                        .truncationMode(.tail)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
                 safetyStrip
+
+                if controller.inputSuppressionFailed, !authenticating {
+                    // The unlock chord lived inside the event tap that just
+                    // died, so this button is the only remaining route to the
+                    // prompt. Frost holds the lock until it succeeds.
+                    Button {
+                        controller.authenticateFromOverlay()
+                    } label: {
+                        Label("Unlock with \(controller.unlockMethodLabel)",
+                              systemImage: authenticationSymbol)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .keyboardShortcut(.defaultAction)
+                }
+
+                if let notice = controller.secureInputNotice {
+                    warningText(notice)
+                }
 
                 if let notice = controller.tapRecoveryNotice {
                     warningText(notice)
@@ -331,32 +414,47 @@ struct LockOverlayView: View {
         .background(cardBackground(cornerRadius: 22))
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.16), lineWidth: 1)
+                .strokeBorder(hairline, lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.28), radius: 32, y: 18)
         .accessibilityElement(children: .contain)
     }
 
-    /// Card fill: translucent material normally, but a near-opaque solid when the
+    /// Card fill: translucent material normally, but an opaque solid when the
     /// user has reduced transparency, so legibility never depends on the desktop
     /// showing through behind the text.
+    ///
+    /// The opaque fill MUST follow the system appearance. Every string on this
+    /// card uses `.primary`/`.secondary`, which resolve to near-black in Light
+    /// Mode; a hard-coded black fill put black text on a black card — unreadable
+    /// in exactly the accessibility setting whose purpose is legibility.
+    /// `.windowBackgroundColor` is near-white in Light Mode and near-black in
+    /// Dark, so the label colors keep their intended contrast in both.
     @ViewBuilder
     private func cardBackground(cornerRadius: CGFloat) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         if reduceTransparency {
-            shape.fill(Color.black.opacity(0.85))
+            shape.fill(Color(nsColor: .windowBackgroundColor))
         } else {
             shape.fill(.ultraThinMaterial)
         }
     }
 
+    // Appearance-aware substitutes for what used to be hard-coded translucent
+    // white. `.ultraThinMaterial` resolves LIGHT in Light Mode, so white-on-white
+    // separators, panel fills and pill capsules vanished there and the card
+    // dissolved into unbounded text over the desktop. `Color.primary` inverts
+    // with the appearance, so a low-opacity tint reads in both modes.
+    private var hairline: Color { Color.primary.opacity(0.15) }
+    private var panelFill: Color { Color.primary.opacity(0.06) }
+
     private var authenticationMark: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.white.opacity(authenticating ? 0.16 : 0.10))
+                .fill(Color.primary.opacity(authenticating ? 0.12 : 0.08))
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.20), lineWidth: 1)
-            Image(systemName: authenticating ? "touchid" : "lock.fill")
+                .strokeBorder(hairline, lineWidth: 1)
+            Image(systemName: authenticating ? authenticationSymbol : "lock.fill")
                 .font(.system(size: authenticating ? 36 : 30, weight: .semibold))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(authenticating ? Color.accentColor : Color.primary)
@@ -372,7 +470,7 @@ struct LockOverlayView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Unlock Shortcut")
                     .font(.headline)
-                Text("Press to open the Touch ID prompt")
+                Text("Press to open the \(controller.unlockMethodLabel) prompt")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -381,19 +479,19 @@ struct LockOverlayView: View {
             Spacer(minLength: 0)
         }
         .padding(16)
-        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(panelFill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Unlock shortcut: \(controller.unlockShortcutSpoken). Press to open the Touch ID prompt.")
+        .accessibilityLabel("Unlock shortcut: \(controller.unlockShortcutSpoken). Press to open the \(controller.unlockMethodLabel) prompt.")
     }
 
     private var authenticatingPrompt: some View {
         VStack(spacing: 12) {
-            Image(systemName: "touchid")
+            Image(systemName: authenticationSymbol)
                 .font(.system(size: 44, weight: .semibold))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(Color.accentColor)
 
-            Text("Respond to the Touch ID prompt. Press Esc to cancel and keep input locked.")
+            Text(authenticationInstruction)
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -401,16 +499,16 @@ struct LockOverlayView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(16)
-        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(panelFill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private var safetyStrip: some View {
         HStack(spacing: 8) {
             statusPill(icon: "keyboard", text: "Input paused")
             statusPill(icon: "cursorarrow", text: "Pointer frozen")
-            // "Touch ID", not "Secured": Frost is not a security product and
-            // must never present itself as one (AGENTS.md framing rule).
-            statusPill(icon: "touchid", text: "Touch ID")
+            // The unlock method, not "Secured": Frost is not a security product
+            // and must never present itself as one (AGENTS.md framing rule).
+            statusPill(icon: authenticationSymbol, text: controller.unlockMethodLabel)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Input paused, pointer frozen.")
@@ -426,7 +524,7 @@ struct LockOverlayView: View {
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.20), lineWidth: 1)
+                    .strokeBorder(hairline, lineWidth: 1)
             }
     }
 
@@ -438,7 +536,7 @@ struct LockOverlayView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
             .frame(maxWidth: .infinity)
-            .background(Color.white.opacity(0.07), in: Capsule())
+            .background(panelFill, in: Capsule())
     }
 
     // A filled banner with dark text, so the warning meets contrast over any
@@ -483,38 +581,60 @@ struct LockOverlayView: View {
         .accessibilityElement(children: .contain)
     }
 
-    /// Single source of truth for the recovery actions — consumed by both the
-    /// horizontal and stacked layouts so the button set can never diverge.
-    /// `spacerBeforeDismiss` reproduces the horizontal layout's trailing-edge
-    /// Dismiss placement; the stacked layout omits it.
+    /// The recovery actions, defined once so the two layouts can never offer a
+    /// different button set. Only the ORDER varies by axis, because the two axes
+    /// have opposite conventions: macOS puts the default action at the trailing
+    /// edge of a row (cancel to its left) and at the TOP of a stack.
+    ///
+    /// The row previously emitted [default] [secondary] —— [Dismiss], so the
+    /// rightmost slot — the one a user reaches for reflexively — was Dismiss. In
+    /// the Accessibility recovery, that is precisely the state where dismissing
+    /// instead of opening System Settings leaves the user with nothing.
     @ViewBuilder
-    private func recoveryActions(_ recovery: RecoveryState, spacerBeforeDismiss: Bool) -> some View {
+    private func recoveryActions(_ recovery: RecoveryState, axis: Axis) -> some View {
+        switch axis {
+        case .horizontal:
+            dismissAction
+            Spacer(minLength: 0)
+            secondaryAction(recovery)
+            prominentAction(recovery)
+        case .vertical:
+            prominentAction(recovery)
+            secondaryAction(recovery)
+            dismissAction
+        }
+    }
+
+    @ViewBuilder
+    private func prominentAction(_ recovery: RecoveryState) -> some View {
         if recovery.showsAccessibilitySettings {
             Button("Open Privacy Settings") { controller.openAccessibilitySettings() }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
-            Button("Quit & Reopen Frost") { controller.quitAndReopenFrost() }
-            if spacerBeforeDismiss {
-                Spacer(minLength: 0)
-            }
-            Button("Dismiss") { controller.dismissRecovery() }
-                .keyboardShortcut(.cancelAction)
-        } else {
-            if recovery.allowsRetry {
-                Button("Try Again") { controller.retryRecovery() }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.defaultAction)
-            }
-            Button("Dismiss") { controller.dismissRecovery() }
-                .keyboardShortcut(.cancelAction)
+        } else if recovery.allowsRetry {
+            Button("Try Again") { controller.retryRecovery() }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
         }
     }
 
+    @ViewBuilder
+    private func secondaryAction(_ recovery: RecoveryState) -> some View {
+        if recovery.showsAccessibilitySettings {
+            Button("Quit & Reopen Frost") { controller.quitAndReopenFrost() }
+        }
+    }
+
+    private var dismissAction: some View {
+        Button("Dismiss") { controller.dismissRecovery() }
+            .keyboardShortcut(.cancelAction)
+    }
+
     private func recoveryButtons(_ recovery: RecoveryState) -> some View {
-        HStack(spacing: 12) { recoveryActions(recovery, spacerBeforeDismiss: true) }
+        HStack(spacing: 12) { recoveryActions(recovery, axis: .horizontal) }
     }
 
     private func stackedRecoveryButtons(_ recovery: RecoveryState) -> some View {
-        VStack(spacing: 10) { recoveryActions(recovery, spacerBeforeDismiss: false) }
+        VStack(spacing: 10) { recoveryActions(recovery, axis: .vertical) }
     }
 }

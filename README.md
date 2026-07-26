@@ -39,14 +39,18 @@ Frost is a focused macOS app in active development.
 When you choose **Lock Input**, Frost:
 
 1. Checks that Touch ID is available and configured.
-2. Checks that Accessibility is granted.
-3. Creates an active `CGEvent` tap.
-4. Suppresses keyboard and pointer events by swallowing them in the tap callback.
-5. Freezes the cursor position.
-6. Shows a translucent overlay on every display.
-7. Hides system switching surfaces that cannot be stopped at the event-tap layer.
-8. Optionally holds power assertions to keep the display and/or system awake.
-9. Waits for the configured unlock shortcut.
+2. Checks that no other app holds secure event input — while it is held, the
+   keyboard never reaches a session-level tap, so the unlock shortcut could not
+   fire.
+3. Checks that Accessibility is granted.
+4. Creates an active `CGEvent` tap.
+5. Suppresses keyboard and pointer events by swallowing them in the tap callback.
+6. Freezes the cursor position.
+7. Shows a translucent overlay on every display — and refuses the lock if no
+   display could host one, rather than suppressing input behind nothing.
+8. Hides system switching surfaces that cannot be stopped at the event-tap layer.
+9. Optionally holds power assertions to keep the display and/or system awake.
+10. Waits for the configured unlock shortcut.
 
 When you press the unlock shortcut, Frost keeps the overlay and event tap active
 and asks macOS to authenticate with
@@ -76,6 +80,21 @@ Frost deliberately does not:
 - send telemetry, analytics, crash reports, licensing calls, or account data
 
 The only intended network activity is Sparkle update checking.
+
+## Frost Never Unlocks Itself
+
+Frost will not hand the machine back without Touch ID. Not after repeated failed
+attempts, not if Touch ID gets locked out, not if the sensor disconnects, not if
+macOS interferes with input blocking, not on any timer.
+
+This is deliberate. Frost cannot tell whether the person at the keyboard is the
+owner who locked themselves out or someone else who walked up, and it does not
+guess. If Touch ID cannot authenticate you, the way back is `pkill -x frost`
+over SSH from another device, or holding the power button. That is the trade
+Frost makes, and it is the reason the app is worth running at all.
+
+The one exception is debug builds, which include an auto-unlock timer so a
+developer cannot trap themselves. It is compiled out of release builds.
 
 ## Safety And Recovery
 
@@ -139,6 +158,12 @@ If macOS disables the event tap while Frost is already locked, Frost attempts to
 re-enable it immediately and shows a visible warning on the overlay. If the tap
 cannot be created at all, Frost does not lock input.
 
+If the tap cannot be re-enabled, input is flowing again — macOS did that, and
+Frost cannot prevent it. Frost still does not unlock: it keeps the overlay up,
+stops claiming to block input, says what happened, and offers an **Unlock with
+Touch ID** button (the unlock shortcut lived inside the tap and is gone with
+it). Only authentication takes the overlay down.
+
 ### Force Quit
 
 Frost disables the Force Quit panel while locked. This is intentional: opening
@@ -164,8 +189,10 @@ quit and reopen Frost before trying to lock input.
 
 ## Settings
 
-Open settings from the menu-bar item. If the menu-bar item is hidden, relaunching
-Frost opens the settings window directly.
+Open settings from the menu-bar item. Frost never opens a window on launch, so
+that starting at login stays silent. If the menu-bar item is hidden, open Frost
+again *while it is already running* (Finder, Spotlight, or `open -a Frost`) —
+that delivers a reopen, which shows the settings window.
 
 Current settings:
 
@@ -179,6 +206,9 @@ Current settings:
 - Allow Apple Watch to unlock: optional, off by default; also accepts a paired,
   unlocked Apple Watch (double-press its side button when prompted) as an
   unlock path alongside Touch ID.
+- Overlay message: optional owner-supplied text shown on the locked overlay
+  while input is suppressed. Empty means none; long messages are shortened so
+  the unlock-shortcut hint always stays visible.
 - Prevent screen saver: holds a display-sleep prevention assertion while locked.
 - Prevent sleep: holds an idle system-sleep prevention assertion while locked.
 - Launch at login: registers Frost as a main-app login item with `SMAppService`.
@@ -201,8 +231,11 @@ contains:
 - Quit Frost
 
 If the menu-bar item is hidden in settings, Frost still needs a way back in.
-`AppDelegate` handles launch and reopen events and shows the explicit AppKit
-settings window.
+`AppDelegate` shows the explicit AppKit settings window when it receives a
+*reopen* — i.e. when Frost is opened again while already running. A plain launch
+deliberately shows nothing, so a login-item start is silent. The one exception is
+the recovery overlay's **Quit & Reopen Frost**, which passes `--show-settings` to
+the instance it launches.
 
 ## Automation
 
@@ -259,7 +292,9 @@ cancelled. Modified Escape combinations, including Force Quit, remain swallowed.
 
 Overlay windows:
 
-- use `.screenSaver` level
+- use `.screenSaver` level while input is locked, and `.floating` for recovery
+  overlays so system dialogs — notably the Accessibility consent prompt — stay
+  above them and clickable
 - join all Spaces
 - support full-screen auxiliary presentation
 - rebuild when screen parameters change
@@ -357,6 +392,10 @@ data types, and UserDefaults access for Frost's own settings.
 - `frost/Shortcut.swift`: shortcut persistence, matching, and display.
 - `frost/ShortcutRecorder.swift`: AppKit-backed shortcut recorder control.
 - `frost/UpdaterController.swift`: Sparkle update wrapper.
+- `frost/SystemHooks.swift`: SIGTERM/SIGINT/SIGHUP handlers and the force-exit
+  watchdog (escape hatch #1), the global lock-hotkey monitor, and the
+  Accessibility-trust observer.
+- `frost/FrostAppIntents.swift`: the Lock Input App Intent and App Shortcut.
 - `scripts/publish.sh`: DMG packaging and appcast generation.
 - `scripts/release.sh`: end-to-end release — DMG + appcast via publish.sh,
   GitHub Release upload, appcast publish to the update host.
@@ -386,6 +425,10 @@ Important project settings:
 
 For AI agents and automated edits, read `AGENTS.md` before touching the project.
 It contains the safety invariants that must not regress.
+
+## License
+
+MIT — see [`LICENSE`](LICENSE).
 
 ## Release Packaging
 

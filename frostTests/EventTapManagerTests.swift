@@ -196,21 +196,107 @@ struct EventTapManagerTests {
             tapIsEnabledAfterReenable: false
         ) == .reviveFailed)
 
-        #expect(EventTapManager.tapDisabledReaction(
+        // Assert what the message has to CONVEY, not its exact prose. This text
+        // is the banner a user finds on a locked screen, so the load-bearing
+        // part is that it tells them input is still locked; transcribing the
+        // string here would only make copy edits fail the suite.
+        let timeout = EventTapManager.tapDisabledReaction(
             type: .tapDisabledByTimeout,
             shouldSuppress: true,
             tapIsEnabledAfterReenable: true
-        ) == .reenabled(
-            message: "The input tap was disabled by macOS after it stopped responding, then re-enabled."
-        ))
-
-        #expect(EventTapManager.tapDisabledReaction(
+        )
+        let userInput = EventTapManager.tapDisabledReaction(
             type: .tapDisabledByUserInput,
             shouldSuppress: true,
             tapIsEnabledAfterReenable: true
-        ) == .reenabled(
-            message: "The input tap was disabled by macOS, then re-enabled."
-        ))
+        )
+
+        guard case .reenabled(let timeoutMessage) = timeout,
+              case .reenabled(let userInputMessage) = userInput
+        else {
+            Issue.record("A revived tap must report .reenabled, got \(timeout) / \(userInput)")
+            return
+        }
+
+        // Both must reassure the user that input is still locked...
+        #expect(timeoutMessage.contains("still locked"))
+        #expect(userInputMessage.contains("still locked"))
+        // ...and the timeout variant must stay distinguishable, since it names a
+        // different cause (Frost was slow to respond) than a plain disable.
+        #expect(timeoutMessage != userInputMessage)
+    }
+
+    // MARK: - Tap-disabled dispatch (the side effects, not just the decision)
+
+    /// The escalation callback must actually be invoked. Previously only the
+    /// pure decision helper was covered, so deleting the `.reviveFailed`
+    /// dispatch in handle() left the suite green while the user lost the
+    /// escalation to a visible recovery state.
+    @Test func reviveFailureInvokesTheEscalationCallback() async {
+        let manager = EventTapManager(cursor: FakeCursor())
+        var escalated = false
+        var reenabledMessage: String?
+        manager.onTapReviveFailed = { escalated = true }
+        manager.onTapReenabled = { reenabledMessage = $0 }
+
+        manager.apply(.reviveFailed)
+        await Task.yield()
+
+        #expect(escalated)
+        #expect(reenabledMessage == nil)
+    }
+
+    @Test func reenabledInvokesTheNoticeCallbackAndRepins() async {
+        let fake = FakeCursor()
+        let manager = EventTapManager(cursor: fake)
+        var escalated = false
+        var reenabledMessage: String?
+        manager.onTapReviveFailed = { escalated = true }
+        manager.onTapReenabled = { reenabledMessage = $0 }
+
+        manager.apply(.reenabled(message: "restored"))
+        await Task.yield()
+
+        #expect(reenabledMessage == "restored")
+        #expect(escalated == false)
+        // Re-freezing the cursor is part of the recovery, not incidental:
+        // setCursorFrozen(true) decouples mouse from cursor.
+        #expect(fake.associations.last == false)
+    }
+
+    @Test func ignoreDoesNothing() async {
+        let manager = EventTapManager(cursor: FakeCursor())
+        var escalated = false
+        var reenabledMessage: String?
+        manager.onTapReviveFailed = { escalated = true }
+        manager.onTapReenabled = { reenabledMessage = $0 }
+
+        manager.apply(.ignore)
+        await Task.yield()
+
+        #expect(escalated == false)
+        #expect(reenabledMessage == nil)
+    }
+
+    // MARK: - Cursor drift
+
+    /// The positive drift case the suite could not reach before: the decision is
+    /// now a pure function, so inverting the comparison (pointer drifts freely
+    /// under an overlay claiming "Pointer frozen") fails a test.
+    @Test func driftBeyondToleranceIsDetectedAndWithinToleranceIsNot() {
+        let manager = EventTapManager(cursor: FakeCursor())
+        manager.primeLockedCursorPositionForTesting(CGPoint(x: 100, y: 100))
+
+        #expect(manager.hasCursorDrifted(from: CGPoint(x: 400, y: 400)))
+        #expect(manager.hasCursorDrifted(from: CGPoint(x: 100, y: 140)))
+        // Sub-pixel jitter must NOT trigger two synchronous WindowServer calls.
+        #expect(!manager.hasCursorDrifted(from: CGPoint(x: 100, y: 100)))
+        #expect(!manager.hasCursorDrifted(from: CGPoint(x: 100.2, y: 99.8)))
+    }
+
+    @Test func driftIsNeverDetectedWithoutALockedPosition() {
+        let manager = EventTapManager(cursor: FakeCursor())
+        #expect(!manager.hasCursorDrifted(from: CGPoint(x: 999, y: 999)))
     }
 
     @Test func repinDoesNotFireWithoutALockedPosition() throws {
