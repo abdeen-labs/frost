@@ -75,9 +75,178 @@ Force Quit (`⌘⌥Esc`) is deliberately disabled while locked (`NSApplicationPr
 - **Updates:** Sparkle `SPUStandardUpdaterController` with a "Check for Updates…" menu item.
 - **Launch at login:** `SMAppService.mainApp`.
 
-## Modules
+## Session lifecycle and app behavior
 
-`LockController`, `PermissionManager`, `OverlayCoordinator`, `EventTapManager`, `UnlockCoordinator`, `SleepAssertionManager`, `InactivityLockMonitor`, `LaunchAtLoginManager`, `SettingsStore`, `SystemHooks` (signal handlers + force-exit watchdog + lock-hotkey monitor), `FrostAppIntents` (the Lock Input intent), and `UpdaterController` (wraps Sparkle).
+- `LockController` owns teardown: release the event tap, restore the cursor,
+  clear presentation options, release power assertions, and dismiss overlays
+  when the session ends through an authorized path.
+- `SIGINT` and `SIGHUP` use the same clean teardown as `SIGTERM`, covering
+  Ctrl-C or a closed session in a terminal opened before locking. `kill -9`
+  and crashes skip teardown and rely on macOS to reclaim the tap and cursor
+  association. Do not describe these as clean exits.
+- The DEBUG auto-unlock timer shows a countdown on the overlay and tears down
+  regardless of authentication state. It must never compile into Release.
+- Startup failures show **Input Not Locked** with recovery guidance and a retry
+  button where retrying in place is useful. Missing Accessibility provides
+  Privacy settings and **Quit & Reopen** actions; a fresh grant requires a
+  relaunch, never an automatic lock attempt.
+- If an existing tap cannot be revived, release the dead tap to restore pointer
+  interaction, retain the overlay and presentation options, and offer an
+  **Unlock with Touch ID** button. The shortcut cannot work without the tap;
+  authentication is still required to dismiss the overlay.
+- The global lock shortcut uses an `NSEvent` monitor only while unlocked. Clear
+  it if it matches the unlock shortcut, which is recognized inside the tap.
+- Overlay messages are optional and truncated so the unlock hint stays visible.
+- The menu's **Lock Input** item reads **Locked** during suppression and
+  **Input Not Locked** during recovery; it is disabled in both states.
+- A plain launch shows no window, keeping login-item starts silent. On reopen,
+  `AppDelegate` shows the explicit AppKit settings window so users can recover
+  a hidden menu-bar item. Recovery's **Quit & Reopen Frost** launches with
+  `--show-settings` to show settings immediately.
+- The **Lock Input** App Intent runs the same preflights and recovery behavior
+  as the menu item. It is a no-op while locked or showing recovery. Debug
+  builds publish **Lock Input (Dev)** to distinguish the installed app.
+- App Shortcuts appear in Shortcuts.app after the first launch, but are not
+  directly in the `shortcuts` CLI library. Users must first create a named
+  shortcut containing the action before invoking `shortcuts run "Lock Input"`.
+  There is no unlock automation or `frost://` URL scheme.
+
+## Implementation reference
+
+### Input Suppression
+
+`EventTapManager` owns a session-level `CGEvent` tap:
+
+- `CGEventTapLocation.cgSessionEventTap`
+- `.headInsertEventTap`
+- `.defaultTap`
+
+Returning `nil` from the callback swallows input. The callback recognizes the
+unlock shortcut before swallowing the key event. The tap mask also includes
+macOS system-defined events, so media keys (volume, brightness, play/pause,
+eject) are suppressed while locked.
+
+Frost deliberately does not use `CGEventTapLocation.cghidEventTap`: Apple's SDK
+requires root for that earlier tap location, and Frost runs as the logged-in
+user.
+
+During authentication, the tap remains active and the overlay remains visible.
+Bare Escape is allowed through so the system authentication prompt can be
+cancelled. Modified Escape combinations, including Force Quit, remain swallowed.
+
+### Overlay
+
+`OverlayCoordinator` creates one borderless `NSWindow` per display.
+
+Overlay windows:
+
+- use `.screenSaver` level while input is locked, and `.floating` for recovery
+  overlays so system dialogs — notably the Accessibility consent prompt — stay
+  above them and clickable
+- join all Spaces
+- support full-screen auxiliary presentation
+- rebuild when screen parameters change
+- place the central affordance inside each display's safe area
+- use a translucent material card so the underlying screen remains visible
+
+The normal locked overlay is informational. Recovery overlays are interactive
+only when input was not successfully locked.
+
+### App Presentation Options
+
+Some system gestures and switchers happen above the HID event layer. Frost uses
+`NSApplicationPresentationOptions` while locked to hide or disable those routes:
+
+- hide Dock
+- hide menu bar
+- disable process switching
+- disable Force Quit
+- disable Apple menu
+
+Those options are always cleared during teardown.
+
+### Local Authentication
+
+`UnlockCoordinator` wraps LocalAuthentication:
+
+```swift
+LAContext.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics)
+```
+
+Before locking, Frost verifies that the Mac reports Touch ID through
+`.deviceOwnerAuthenticationWithBiometrics`. During unlock, a fresh `LAContext`
+(with an empty `localizedFallbackTitle`, so no password button) is evaluated with
+`.deviceOwnerAuthenticationWithBiometrics`, presenting the standard system Touch
+ID prompt — Touch ID only, since keyboard input stays suppressed while locked.
+If "Allow Apple Watch to unlock" is enabled in Settings, Frost evaluates
+`.deviceOwnerAuthenticationWithBiometricsOrWatch` instead, so a paired,
+unlocked Watch can approve the unlock; the no-password rationale is
+unchanged — both paths are out-of-band from the suppressed keyboard.
+
+### Power Assertions
+
+`SleepAssertionManager` uses IOKit power assertions while locked:
+
+- `kIOPMAssertionTypePreventUserIdleDisplaySleep`
+- `kIOPMAssertionTypePreventUserIdleSystemSleep`
+
+They are controlled by settings and released on every teardown path. They do not
+override the power button or closed-lid behavior.
+
+### Updates
+
+`UpdaterController` owns Sparkle's `SPUStandardUpdaterController`.
+
+Sparkle reads:
+
+- `SUFeedURL` from `frost/Info.plist`
+- `SUPublicEDKey` from `frost/Info.plist`
+
+The current feed URL is:
+
+```text
+https://updates.abdeen.dev/frost/appcast.xml
+```
+
+Do not replace `SUPublicEDKey`. It is the public EdDSA key used to verify
+updates for existing installs.
+
+Frost sets `SUVerifyUpdateBeforeExtraction` so a downloaded update's EdDSA
+signature is verified before the archive is even unarchived. Sparkle's
+scheduled background checks are deferred while input is locked, so an update
+alert can never compete with the Touch ID prompt for focus.
+
+### Privacy Manifest
+
+`PrivacyInfo.xcprivacy` declares no tracking, no tracking domains, no collected
+data types, and UserDefaults access for Frost's own settings.
+
+## Source map
+
+- `frost/frostApp.swift`: app entry point, menu-bar item, shared controllers.
+- `frost/AppDelegate.swift`: launch/reopen hooks for showing settings.
+- `frost/SettingsWindowController.swift`: explicit AppKit settings window.
+- `frost/SettingsView.swift`: settings UI.
+- `frost/SettingsStore.swift`: persisted user preferences.
+- `frost/LockController.swift`: lock-session state machine and teardown owner.
+- `frost/EventTapManager.swift`: active `CGEvent` tap and unlock shortcut handling.
+- `frost/InactivityLockMonitor.swift`: idle-time polling for optional auto-lock.
+- `frost/InactivityLockOption.swift`: persisted inactivity timeout choices.
+- `frost/LaunchAtLoginManager.swift`: `SMAppService.mainApp` wrapper.
+- `frost/OverlayCoordinator.swift`: per-display overlay windows and recovery UI.
+- `frost/UnlockCoordinator.swift`: LocalAuthentication wrapper.
+- `frost/SleepAssertionManager.swift`: display and system idle assertions.
+- `frost/PermissionManager.swift`: Accessibility checks.
+- `frost/Shortcut.swift`: shortcut persistence, matching, and display.
+- `frost/ShortcutRecorder.swift`: AppKit-backed shortcut recorder control.
+- `frost/UpdaterController.swift`: Sparkle update wrapper.
+- `frost/SystemHooks.swift`: SIGTERM/SIGINT/SIGHUP handlers and the force-exit
+  watchdog (escape hatch #1), the global lock-hotkey monitor, and the
+  Accessibility-trust observer.
+- `frost/FrostAppIntents.swift`: the Lock Input App Intent and App Shortcut.
+- `scripts/publish.sh`: DMG packaging and appcast generation.
+- `scripts/release.sh`: end-to-end release — DMG + appcast via publish.sh,
+  GitHub Release upload, appcast publish to the update host.
 
 ## Signing & secrets
 
@@ -89,9 +258,69 @@ Force Quit (`⌘⌥Esc`) is deliberately disabled while locked (`NSApplicationPr
 - Target: macOS 14+ (`MACOSX_DEPLOYMENT_TARGET = 14.6`), SwiftUI + AppKit hybrid, `LSUIElement` agent (no Dock icon). Bundle id `dev.abdeen.frost`.
 - Agents should **not** run `xcodebuild`. Hand builds/tests to the human and ask for the output.
 - When handing verification to the human, ask them to run `scripts/test.sh` — it is the exact CI invocation.
-- Releases are packaged with `scripts/publish.sh` (DMG + `generate_appcast`); the appcast is hosted at `https://updates.abdeen.dev/frost/appcast.xml`.
+
+### Building from source (human workflow)
+
+1. Open `frost.xcodeproj` in Xcode.
+2. Select the `frost` target/scheme.
+3. Build and run.
+4. Grant Accessibility when prompted.
+5. Quit and relaunch Frost so the Accessibility grant is active in the app process.
+
+To run the unit suite from the command line: `scripts/test.sh` (same invocation CI uses).
+
+Important project settings:
+
+- `MACOSX_DEPLOYMENT_TARGET = 14.6`
+- `ENABLE_APP_SANDBOX = NO`
+- `ENABLE_HARDENED_RUNTIME = YES`
+- `INFOPLIST_KEY_LSUIElement = YES`
+- Bundle id is configuration-specific so a dev build can coexist with an
+  installed copy without fighting over the same Accessibility (TCC) grant:
+  Debug builds use `dev.abdeen.frost.debug` and display as "Frost (Dev)";
+  Release keeps `dev.abdeen.frost` / "Frost". Grant Accessibility to each once.
+- Sparkle is resolved through Swift Package Manager (currently 2.9.3).
+- `PrivacyInfo.xcprivacy` is bundled from the synchronized `frost` folder.
+
+## Release packaging
+
+Releases are cut with:
+
+```sh
+scripts/release.sh /path/to/frost.app
+```
+
+from an already exported, signed, notarized, and stapled `frost.app`. See
+`RELEASING.md` for the full procedure, including one-time setup.
+
+`release.sh`:
+
+1. Builds `dist/Frost-<version>.dmg` and the EdDSA-signed `dist/appcast.xml`
+   (via `scripts/publish.sh`).
+2. Creates the GitHub Release `v<version>` and uploads the DMG there.
+3. Commits the appcast to the abdeen.dev repo, which serves it at
+   `https://updates.abdeen.dev/frost/appcast.xml`.
+
+The DMG lives on GitHub Releases; only the appcast lives on the update
+domain. The appcast's enclosure URL points at the GitHub asset.
+
+`scripts/publish.sh` is the lower-level DMG/appcast builder that
+`release.sh` drives. Running it standalone is for dry runs and legacy
+flows, not the release procedure.
+
+Release notes for both the GitHub release and the in-app Sparkle update dialog
+come from the matching [`CHANGELOG.md`](CHANGELOG.md) section (extracted by
+`scripts/changelog.sh`), so update the changelog before cutting a release — see
+`RELEASING.md`.
+
+Sparkle's private EdDSA key belongs in the developer's login Keychain, created
+by Sparkle's `generate_keys`. It must not be committed or written into this
+repository.
 
 ## Working style
 
 - Build in phases; do not scaffold the whole app at once.
 - Keep changes narrow and consistent with the surrounding code.
+- Keep `README.md` focused on installation, everyday use, settings, privacy,
+  and recovery. Put implementation details and contributor instructions here;
+  keep the full release procedure in `RELEASING.md`.
