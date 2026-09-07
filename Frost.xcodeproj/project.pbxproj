@@ -21,17 +21,17 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		E43D5A3D2FED624400DA984B /* frost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = frost.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		E451B8722FF179A000CDD600 /* frostTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = frostTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		E43D5A3D2FED624400DA984B /* Frost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Frost.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E451B8722FF179A000CDD600 /* FrostTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FrostTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		E410A0412FED643D000FF4B6 /* Exceptions for "frost" folder in "frost" target */ = {
+		E410A0412FED643D000FF4B6 /* Exceptions for "frost" folder in "Frost" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
-			target = E43D5A3C2FED624400DA984B /* frost */;
+			target = E43D5A3C2FED624400DA984B /* Frost */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -39,7 +39,7 @@
 		E43D5A3F2FED624400DA984B /* frost */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				E410A0412FED643D000FF4B6 /* Exceptions for "frost" folder in "frost" target */,
+				E410A0412FED643D000FF4B6 /* Exceptions for "frost" folder in "Frost" target */,
 			);
 			path = frost;
 			sourceTree = "<group>";
@@ -82,8 +82,8 @@
 		E43D5A3E2FED624400DA984B /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				E43D5A3D2FED624400DA984B /* frost.app */,
-				E451B8722FF179A000CDD600 /* frostTests.xctest */,
+				E43D5A3D2FED624400DA984B /* Frost.app */,
+				E451B8722FF179A000CDD600 /* FrostTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -91,9 +91,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		E43D5A3C2FED624400DA984B /* frost */ = {
+		E43D5A3C2FED624400DA984B /* Frost */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = E43D5A4A2FED624500DA984B /* Build configuration list for PBXNativeTarget "frost" */;
+			buildConfigurationList = E43D5A4A2FED624500DA984B /* Build configuration list for PBXNativeTarget "Frost" */;
 			buildPhases = (
 				E43D5A392FED624400DA984B /* Sources */,
 				E43D5A3A2FED624400DA984B /* Frameworks */,
@@ -106,17 +106,17 @@
 			fileSystemSynchronizedGroups = (
 				E43D5A3F2FED624400DA984B /* frost */,
 			);
-			name = frost;
+			name = Frost;
 			packageProductDependencies = (
 				E410A03E2FED633A000FF4B6 /* Sparkle */,
 			);
 			productName = frost;
-			productReference = E43D5A3D2FED624400DA984B /* frost.app */;
+			productReference = E43D5A3D2FED624400DA984B /* Frost.app */;
 			productType = "com.apple.product-type.application";
 		};
-		E451B8712FF179A000CDD600 /* frostTests */ = {
+		E451B8712FF179A000CDD600 /* FrostTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = E451B8782FF179A000CDD600 /* Build configuration list for PBXNativeTarget "frostTests" */;
+			buildConfigurationList = E451B8782FF179A000CDD600 /* Build configuration list for PBXNativeTarget "FrostTests" */;
 			buildPhases = (
 				E451B86E2FF179A000CDD600 /* Sources */,
 				E451B86F2FF179A000CDD600 /* Frameworks */,
@@ -130,11 +130,11 @@
 			fileSystemSynchronizedGroups = (
 				E451B8732FF179A000CDD600 /* frostTests */,
 			);
-			name = frostTests;
+			name = FrostTests;
 			packageProductDependencies = (
 			);
 			productName = frostTests;
-			productReference = E451B8722FF179A000CDD600 /* frostTests.xctest */;
+			productReference = E451B8722FF179A000CDD600 /* FrostTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
 /* End PBXNativeTarget section */
@@ -145,7 +145,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 2650;
-				LastUpgradeCheck = 2650;
+				LastUpgradeCheck = 2700;
 				TargetAttributes = {
 					E43D5A3C2FED624400DA984B = {
 						CreatedOnToolsVersion = 26.5;
@@ -156,7 +156,7 @@
 					};
 				};
 			};
-			buildConfigurationList = E43D5A382FED624400DA984B /* Build configuration list for PBXProject "frost" */;
+			buildConfigurationList = E43D5A382FED624400DA984B /* Build configuration list for PBXProject "Frost" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -173,8 +173,8 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				E43D5A3C2FED624400DA984B /* frost */,
-				E451B8712FF179A000CDD600 /* frostTests */,
+				E43D5A3C2FED624400DA984B /* Frost */,
+				E451B8712FF179A000CDD600 /* FrostTests */,
 			);
 		};
 /* End PBXProject section */
@@ -216,7 +216,7 @@
 /* Begin PBXTargetDependency section */
 		E451B87A2FF179A400CDD600 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = E43D5A3C2FED624400DA984B /* frost */;
+			target = E43D5A3C2FED624400DA984B /* Frost */;
 			targetProxy = E451B8792FF179A400CDD600 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
@@ -256,6 +256,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 38U4X64GHV;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -281,6 +282,7 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -320,6 +322,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 38U4X64GHV;
 				ENABLE_NS_ASSERTIONS = NO;
@@ -338,6 +341,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 			};
 			name = Release;
@@ -350,6 +354,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 16;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 38U4X64GHV;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -387,6 +392,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 16;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 38U4X64GHV;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -422,6 +428,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 38U4X64GHV;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -443,7 +450,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/frost.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/frost";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Frost.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Frost";
 			};
 			name = Debug;
 		};
@@ -453,6 +460,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 38U4X64GHV;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.6;
@@ -470,7 +478,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/frost.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/frost";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Frost.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Frost";
 				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;
@@ -478,7 +486,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		E43D5A382FED624400DA984B /* Build configuration list for PBXProject "frost" */ = {
+		E43D5A382FED624400DA984B /* Build configuration list for PBXProject "Frost" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				E43D5A482FED624500DA984B /* Debug */,
@@ -487,7 +495,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		E43D5A4A2FED624500DA984B /* Build configuration list for PBXNativeTarget "frost" */ = {
+		E43D5A4A2FED624500DA984B /* Build configuration list for PBXNativeTarget "Frost" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				E43D5A4B2FED624500DA984B /* Debug */,
@@ -496,7 +504,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		E451B8782FF179A000CDD600 /* Build configuration list for PBXNativeTarget "frostTests" */ = {
+		E451B8782FF179A000CDD600 /* Build configuration list for PBXNativeTarget "FrostTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				E451B8762FF179A000CDD600 /* Debug */,

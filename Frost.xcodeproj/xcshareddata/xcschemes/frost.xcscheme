@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
-   LastUpgradeVersion = "2650"
+   LastUpgradeVersion = "2700"
    version = "1.7">
    <BuildAction
       parallelizeBuildables = "YES"
@@ -16,8 +16,8 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "E43D5A3C2FED624400DA984B"
-               BuildableName = "frost.app"
-               BlueprintName = "frost"
+               BuildableName = "Frost.app"
+               BlueprintName = "Frost"
                ReferencedContainer = "container:frost.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -35,8 +35,8 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "E451B8712FF179A000CDD600"
-               BuildableName = "frostTests.xctest"
-               BlueprintName = "frostTests"
+               BuildableName = "FrostTests.xctest"
+               BlueprintName = "FrostTests"
                ReferencedContainer = "container:frost.xcodeproj">
             </BuildableReference>
          </TestableReference>
@@ -58,8 +58,8 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "E43D5A3C2FED624400DA984B"
-            BuildableName = "frost.app"
-            BlueprintName = "frost"
+            BuildableName = "Frost.app"
+            BlueprintName = "Frost"
             ReferencedContainer = "container:frost.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -75,8 +75,8 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "E43D5A3C2FED624400DA984B"
-            BuildableName = "frost.app"
-            BlueprintName = "frost"
+            BuildableName = "Frost.app"
+            BlueprintName = "Frost"
             ReferencedContainer = "container:frost.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>

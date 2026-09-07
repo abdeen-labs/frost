@@ -40,8 +40,9 @@ reinstalled by hand from the download page.
    updates for every installed copy. (`publish.sh` also enforces this match
    automatically before signing, along with `stapler validate` and a
    Gatekeeper `spctl` assessment of the exported app.)
-4. **`gh auth login`**, and an **abdeen.dev checkout** with push access (the
-   release script commits the appcast there; Vercel deploys on push).
+4. **`gh auth login`**, and a checkout of **`github.com/abdeen-labs/abdeen.dev`**
+   with push access (the release script commits the appcast there; Vercel
+   deploys on push).
 5. **Appcast route**: `public/frost/appcast.xml` in the abdeen.dev repo is served
    at `abdeen.dev/frost/appcast.xml` (`SUFeedURL`) as a plain static file. Vercel's
    default `application/xml` content type is fine for Sparkle. There is nothing to
@@ -70,11 +71,15 @@ reinstalled by hand from the download page.
    GitHub release, and commits + pushes the appcast to the abdeen.dev repo so
    Vercel deploys it):
    ```sh
-   ABDEEN_DEV_REPO=~/GitHub/abdeen.dev scripts/release.sh /path/to/frost.app
+   ABDEEN_DEV_REPO=~/GitHub/abdeen-labs/abdeen.dev scripts/release.sh /path/to/frost.app
    ```
    `ABDEEN_DEV_REPO` defaults to `../abdeen.dev` (a sibling checkout), so you can
-   omit it if the repos sit side by side. Add `DEPLOY=0` to build + create the
-   release but only write the appcast into the repo (no commit/push).
+   omit it only if the repos sit side by side. Add `DEPLOY=0` to build + create
+   the release but only write the appcast into the repo (no commit/push).
+
+   The script is not resumable: if it fails after `gh release create`, do the
+   last step by hand — copy `dist/appcast.xml` to `public/frost/appcast.xml` in
+   the site checkout, commit only that file, and push `main`.
 6. **Verify**: open the GitHub release, confirm the `.dmg` downloads and opens
    without a Gatekeeper warning, then confirm an older build sees the update via
    *Check for Updates…* — and that the update dialog now shows the release notes
