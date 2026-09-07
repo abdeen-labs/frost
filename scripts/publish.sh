@@ -30,7 +30,7 @@ set -euo pipefail
 # --- Config -----------------------------------------------------------------
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$REPO_ROOT/dist"
-REPO_SLUG="${REPO_SLUG:-Cuzeth/frost}"
+REPO_SLUG="${REPO_SLUG:-abdeen-labs/frost}"
 APP_PATH="${APP_PATH:-${1:-$REPO_ROOT/build/export/frost.app}}"
 
 # --- Locate the exported .app ----------------------------------------------
@@ -99,7 +99,7 @@ echo "Packaging Frost $SHORT_VERSION (build $BUILD_VERSION)"
 # Where the appcast's <enclosure url> should point. release.sh exports this to
 # aim at the GitHub Releases asset for the tag it is about to create; the
 # default below resolves to the same place, because that is where DMGs actually
-# live (RELEASING.md: only the appcast is served from updates.abdeen.dev). A
+# live (RELEASING.md: only the appcast is served from abdeen.dev). A
 # default pointing at the update host would mint items whose enclosure 404s.
 DOWNLOAD_URL_PREFIX="${DOWNLOAD_URL_PREFIX:-https://github.com/$REPO_SLUG/releases/download/v$SHORT_VERSION/}"
 

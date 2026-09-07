@@ -12,14 +12,22 @@ Two independent trust layers ship a release. Don't conflate them:
 
 | Artifact | Host |
 |---|---|
-| `Frost-x.y.z.dmg` (notarized) | GitHub Releases (`github.com/Cuzeth/frost`) |
-| `appcast.xml` (EdDSA-signed) | `public/frost/appcast.xml` in the **abdeen.dev repo**, served at `updates.abdeen.dev/frost/appcast.xml` |
+| `Frost-x.y.z.dmg` (notarized) | GitHub Releases (`github.com/abdeen-labs/frost`) |
+| `appcast.xml` (EdDSA-signed) | `public/frost/appcast.xml` in the **abdeen.dev repo**, served at `abdeen.dev/frost/appcast.xml` |
 | Download page | `abdeen.dev/frost` — also in the abdeen.dev repo (`src/app/frost`), reads the latest release from GitHub at load time |
 
-`updates.abdeen.dev` is a **domain alias** of the single abdeen.dev Vercel
-project, so the appcast is just a static file in that repo and ships when the site
-deploys. The appcast's `<enclosure url>` points back at the GitHub DMG — the DMG
-is never uploaded to your domain. The download page doesn't change per release.
+The appcast is just a static file in the abdeen.dev Vercel project and ships when
+the site deploys. The appcast's `<enclosure url>` points back at the GitHub DMG —
+the DMG is never uploaded to your domain. The download page doesn't change per
+release.
+
+Builds up to 2.2 shipped with `SUFeedURL` pointing at
+`updates.abdeen.dev/frost/appcast.xml`, a domain alias of the same Vercel project
+serving the same file; 2.2.1 moved the feed to the apex domain. An install only
+learns the new address by updating to 2.2.1 or later *through the old one*, so
+keep the alias resolving (or 301 it to the apex URL) until the installs you care
+about have moved. Once it is gone, anything still on 2.2 or older has to be
+reinstalled by hand from the download page.
 
 ## One-time setup
 
@@ -34,12 +42,10 @@ is never uploaded to your domain. The download page doesn't change per release.
    Gatekeeper `spctl` assessment of the exported app.)
 4. **`gh auth login`**, and an **abdeen.dev checkout** with push access (the
    release script commits the appcast there; Vercel deploys on push).
-5. **Add `updates.abdeen.dev` as a domain** on the abdeen.dev Vercel project
-   (Project → Settings → Domains), and point its DNS at Vercel. Both
-   `abdeen.dev/frost/appcast.xml` and `updates.abdeen.dev/frost/appcast.xml` then
-   serve `public/frost/appcast.xml`. Serving `.xml` as `application/xml` (the
-   default) is fine for Sparkle. This is the only piece that makes `SUFeedURL`
-   resolve, so do it before the first release.
+5. **Appcast route**: `public/frost/appcast.xml` in the abdeen.dev repo is served
+   at `abdeen.dev/frost/appcast.xml` (`SUFeedURL`) as a plain static file. Vercel's
+   default `application/xml` content type is fine for Sparkle. There is nothing to
+   configure beyond the site itself.
 6. **Download page**: the `abdeen.dev/frost` route (`src/app/frost`). It reads the
    latest release from GitHub, so it doesn't need redeploying per version — it
    ships with the abdeen.dev site.

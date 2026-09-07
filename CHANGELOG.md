@@ -17,6 +17,12 @@ them for someone deciding whether to install the update.
      "## [x.y.z] - YYYY-MM-DD" heading just below, so the entries fall under it;
      then repoint the [Unreleased] link and add a compare-link at the bottom. -->
 
+## [2.2.1] - 2026-09-06
+
+### Changed
+
+- Frost now checks for updates at abdeen.dev instead of updates.abdeen.dev. Install this update to keep receiving updates once the old address is retired. This release contains no other changes.
+
 ## [2.2] - 2026-07-25
 
 ### Added
@@ -155,17 +161,18 @@ Initial public release.
 - Pointer stays pinned while the screen is locked.
 - Sparkle-based automatic updates.
 
-[Unreleased]: https://github.com/Cuzeth/frost/compare/v2.2...HEAD
-[2.2]: https://github.com/Cuzeth/frost/compare/v2.1.2...v2.2
-[2.1.2]: https://github.com/Cuzeth/frost/compare/v2.1.1...v2.1.2
-[2.1.1]: https://github.com/Cuzeth/frost/compare/v2.1...v2.1.1
-[2.1]: https://github.com/Cuzeth/frost/compare/v2.0...v2.1
-[2.0]: https://github.com/Cuzeth/frost/compare/v1.4...v2.0
-[1.4]: https://github.com/Cuzeth/frost/compare/v1.3...v1.4
-[1.3]: https://github.com/Cuzeth/frost/compare/v1.2.1...v1.3
-[1.2.1]: https://github.com/Cuzeth/frost/compare/v1.2...v1.2.1
-[1.2]: https://github.com/Cuzeth/frost/compare/v1.1...v1.2
-[1.1]: https://github.com/Cuzeth/frost/compare/v1.0.2...v1.1
-[1.0.2]: https://github.com/Cuzeth/frost/compare/v1.0.1...v1.0.2
-[1.0.1]: https://github.com/Cuzeth/frost/compare/v1.0...v1.0.1
-[1.0]: https://github.com/Cuzeth/frost/releases/tag/v1.0
+[Unreleased]: https://github.com/abdeen-labs/frost/compare/v2.2.1...HEAD
+[2.2.1]: https://github.com/abdeen-labs/frost/compare/v2.2...v2.2.1
+[2.2]: https://github.com/abdeen-labs/frost/compare/v2.1.2...v2.2
+[2.1.2]: https://github.com/abdeen-labs/frost/compare/v2.1.1...v2.1.2
+[2.1.1]: https://github.com/abdeen-labs/frost/compare/v2.1...v2.1.1
+[2.1]: https://github.com/abdeen-labs/frost/compare/v2.0...v2.1
+[2.0]: https://github.com/abdeen-labs/frost/compare/v1.4...v2.0
+[1.4]: https://github.com/abdeen-labs/frost/compare/v1.3...v1.4
+[1.3]: https://github.com/abdeen-labs/frost/compare/v1.2.1...v1.3
+[1.2.1]: https://github.com/abdeen-labs/frost/compare/v1.2...v1.2.1
+[1.2]: https://github.com/abdeen-labs/frost/compare/v1.1...v1.2
+[1.1]: https://github.com/abdeen-labs/frost/compare/v1.0.2...v1.1
+[1.0.2]: https://github.com/abdeen-labs/frost/compare/v1.0.1...v1.0.2
+[1.0.1]: https://github.com/abdeen-labs/frost/compare/v1.0...v1.0.1
+[1.0]: https://github.com/abdeen-labs/frost/releases/tag/v1.0

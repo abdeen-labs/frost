@@ -12,12 +12,13 @@
 #      pushing — Vercel then deploys it.
 #
 # Hosting model: the DMG lives on GitHub Releases (the appcast's <enclosure url>
-# points back at that asset). updates.abdeen.dev is a domain ALIAS of the single
-# abdeen.dev Vercel project, so the appcast is just a static file in that repo at
-# public/frost/appcast.xml — served at https://updates.abdeen.dev/frost/appcast.xml
-# (the SUFeedURL) and at https://abdeen.dev/frost/appcast.xml. The download PAGE
-# also lives in the abdeen.dev repo (src/app/frost), reads GitHub at load time,
-# and ships with the site — it is not touched here.
+# points back at that asset). The appcast is a static file in the abdeen.dev
+# repo at public/frost/appcast.xml, served by Vercel at
+# https://abdeen.dev/frost/appcast.xml (the SUFeedURL). Builds up to 2.2 poll
+# the same file through the updates.abdeen.dev alias; keep that alias resolving
+# until they have migrated (see RELEASING.md). The download PAGE also lives in
+# the abdeen.dev repo (src/app/frost), reads GitHub at load time, and ships with
+# the site — it is not touched here.
 #
 # Usage:
 #   scripts/release.sh /path/to/frost.app                 # build, release, publish
@@ -43,7 +44,7 @@ if [ "${SKIP_NOTARIZATION_CHECK:-0}" = "1" ]; then
 fi
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-REPO_SLUG="${REPO_SLUG:-Cuzeth/frost}"
+REPO_SLUG="${REPO_SLUG:-abdeen-labs/frost}"
 APP_PATH="${APP_PATH:-${1:-$REPO_ROOT/build/export/frost.app}}"
 SITE_REPO="${ABDEEN_DEV_REPO:-$REPO_ROOT/../abdeen.dev}"
 
@@ -149,9 +150,9 @@ else
 fi
 
 # --- 3. Publish the appcast via the abdeen.dev site -------------------------
-# updates.abdeen.dev is a domain alias of the abdeen.dev Vercel project, so the
-# appcast is a static file in that repo. Copy it in, then commit + push only that
-# file (a pathspec commit, so unrelated working changes are never swept in).
+# The appcast is a static file in the abdeen.dev repo, served by Vercel. Copy it
+# in, then commit + push only that file (a pathspec commit, so unrelated working
+# changes are never swept in).
 if [ ! -d "$SITE_REPO/.git" ]; then
   echo "error: abdeen.dev repo not found at: $SITE_REPO" >&2
   echo "Set ABDEEN_DEV_REPO to its path, or copy dist/appcast.xml to" >&2
@@ -197,6 +198,6 @@ fi
 echo
 echo "Done."
 echo "  Release: https://github.com/$REPO_SLUG/releases/tag/$TAG"
-echo "  Appcast: https://updates.abdeen.dev/frost/appcast.xml"
+echo "  Appcast: https://abdeen.dev/frost/appcast.xml"
 echo "  Verify:  open the release page, confirm the .dmg downloads, then check an"
 echo "           older build sees the update via Check for Updates..."

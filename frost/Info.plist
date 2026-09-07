@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>SUFeedURL</key>
-	<string>https://updates.abdeen.dev/frost/appcast.xml</string>
+	<string>https://abdeen.dev/frost/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>V8xkC2BQlZG91vsCTw7ACPjL1dbRlBKo+ftb9ymNbdM=</string>
 	<key>SUVerifyUpdateBeforeExtraction</key>

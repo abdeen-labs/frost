@@ -205,8 +205,11 @@ Sparkle reads:
 The current feed URL is:
 
 ```text
-https://updates.abdeen.dev/frost/appcast.xml
+https://abdeen.dev/frost/appcast.xml
 ```
+
+Builds up to 2.2 read the same file through the `updates.abdeen.dev` alias;
+`RELEASING.md` covers keeping that alias alive until they have migrated.
 
 Do not replace `SUPublicEDKey`. It is the public EdDSA key used to verify
 updates for existing installs.
@@ -299,7 +302,7 @@ from an already exported, signed, notarized, and stapled `frost.app`. See
    (via `scripts/publish.sh`).
 2. Creates the GitHub Release `v<version>` and uploads the DMG there.
 3. Commits the appcast to the abdeen.dev repo, which serves it at
-   `https://updates.abdeen.dev/frost/appcast.xml`.
+   `https://abdeen.dev/frost/appcast.xml`.
 
 The DMG lives on GitHub Releases; only the appcast lives on the update
 domain. The appcast's enclosure URL points at the GitHub asset.
