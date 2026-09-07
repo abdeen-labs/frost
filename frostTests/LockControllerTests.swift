@@ -17,7 +17,7 @@ import Carbon.HIToolbox
 import Foundation
 import Testing
 
-@testable import frost
+@testable import Frost
 
 // MARK: - Fakes
 

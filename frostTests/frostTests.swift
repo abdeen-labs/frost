@@ -16,7 +16,7 @@
 
 import Testing
 
-@testable import frost
+@testable import Frost
 
 @MainActor
 struct frostTests {

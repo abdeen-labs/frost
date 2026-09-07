@@ -12,7 +12,7 @@ import Carbon.HIToolbox
 import CoreGraphics
 import Testing
 
-@testable import frost
+@testable import Frost
 
 // `@MainActor` to match the app's `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, so
 // MainActor-isolated conformances (Equatable/Codable on Shortcut) are usable here.

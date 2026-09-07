@@ -11,7 +11,7 @@ import CoreGraphics
 import Foundation
 import Testing
 
-@testable import frost
+@testable import Frost
 
 @MainActor
 final class InactivityLockMonitorTests {

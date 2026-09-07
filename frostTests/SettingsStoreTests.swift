@@ -12,7 +12,7 @@ import Carbon.HIToolbox
 import Foundation
 import Testing
 
-@testable import frost
+@testable import Frost
 
 @MainActor
 final class SettingsStoreTests {

@@ -13,7 +13,7 @@ import Carbon.HIToolbox
 import CoreGraphics
 import Testing
 
-@testable import frost
+@testable import Frost
 
 @MainActor
 private final class FakeCursor: CursorControlling {

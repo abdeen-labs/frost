@@ -9,7 +9,7 @@
 import Foundation
 import Testing
 
-@testable import frost
+@testable import Frost
 
 @MainActor
 struct InactivityLockOptionTests {

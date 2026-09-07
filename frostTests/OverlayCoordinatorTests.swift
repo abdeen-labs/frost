@@ -11,7 +11,7 @@
 import CoreGraphics
 import Testing
 
-@testable import frost
+@testable import Frost
 
 @MainActor
 struct OverlayCoordinatorTests {
