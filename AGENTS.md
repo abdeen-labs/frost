@@ -50,7 +50,7 @@ means the lock never began and no input was ever taken.
 
 Input suppression can trap the user with no way to type or click. Every change must preserve **all** of these escape hatches. If a change would weaken any of them, stop and flag it.
 
-1. **Remote kill (SIGTERM).** Frost catches `SIGTERM` and tears the lock down cleanly (restores the cursor, releases the tap) before exiting, independent of app state. Because the event tap blocks *local* input, the realistic way to trigger it is **over SSH from another device** (`pkill -x frost` / `kill <pid>`) with Remote Login enabled in advance, or from a terminal you opened before locking — document it that way. (There is intentionally no in-repo killswitch script; the SIGTERM handler is the contract.)
+1. **Remote kill (SIGTERM).** Frost catches `SIGTERM` and tears the lock down cleanly (restores the cursor, releases the tap) before exiting, independent of app state. Because the event tap blocks *local* input, the realistic way to trigger it is **over SSH from another device** (`pkill -ix frost` / `kill <pid>`; the executable is `Frost`, and `-i` also matches builds up to 2.2.1, whose executable was `frost` — keep the `-i`) with Remote Login enabled in advance, or from a terminal you opened before locking — document it that way. (There is intentionally no in-repo killswitch script; the SIGTERM handler is the contract.)
 2. **Debug auto-unlock timer.** In DEBUG builds, a timer tears the lock down after N seconds regardless of auth. It must be present from the very first line of tap code and must never compile into release builds (`#if DEBUG`).
 3. **Visible recovery / warning state.** If the event tap can't be created, the overlay must show a clear, visible "input unavailable / how to recover" recovery state rather than silently trapping input. If the tap gets disabled (`tapDisabledByTimeout` / `tapDisabledByUserInput`) while locked, re-enable it and show a visible warning on the overlay. If it cannot be re-enabled, keep holding the lock and require authentication — see THE INVARIANT above. These hatches exist so a lock never becomes *invisible* or *unexplained*; none of them is a way out without authentication.
 
@@ -264,8 +264,8 @@ data types, and UserDefaults access for Frost's own settings.
 
 ### Building from source (human workflow)
 
-1. Open `frost.xcodeproj` in Xcode.
-2. Select the `frost` target/scheme.
+1. Open `Frost.xcodeproj` in Xcode.
+2. Select the `frost` scheme (it builds the `Frost` target).
 3. Build and run.
 4. Grant Accessibility when prompted.
 5. Quit and relaunch Frost so the Accessibility grant is active in the app process.

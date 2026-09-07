@@ -17,6 +17,12 @@ them for someone deciding whether to install the update.
      "## [x.y.z] - YYYY-MM-DD" heading just below, so the entries fall under it;
      then repoint the [Unreleased] link and add a compare-link at the bottom. -->
 
+## [2.2.2] - 2026-09-06
+
+### Changed
+
+- The Frost process is now named `Frost` rather than `frost`. The SSH recovery command is now `pkill -ix frost`, which matches either name, so it works on this and earlier versions.
+
 ## [2.2.1] - 2026-09-06
 
 ### Changed
@@ -161,7 +167,8 @@ Initial public release.
 - Pointer stays pinned while the screen is locked.
 - Sparkle-based automatic updates.
 
-[Unreleased]: https://github.com/abdeen-labs/frost/compare/v2.2.1...HEAD
+[Unreleased]: https://github.com/abdeen-labs/frost/compare/v2.2.2...HEAD
+[2.2.2]: https://github.com/abdeen-labs/frost/compare/v2.2.1...v2.2.2
 [2.2.1]: https://github.com/abdeen-labs/frost/compare/v2.2...v2.2.1
 [2.2]: https://github.com/abdeen-labs/frost/compare/v2.1.2...v2.2
 [2.1.2]: https://github.com/abdeen-labs/frost/compare/v2.1.1...v2.1.2

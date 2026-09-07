@@ -17,7 +17,7 @@
 //    1. The unlock chord (⌃⌥⌘U) → Touch ID → success. The only in-app route.
 //       If macOS kills the tap the chord dies with it, and the overlay's
 //       authenticate button becomes the only route — still through Touch ID.
-//    2. Process death: SIGTERM (e.g. `pkill -x frost` over SSH), or power-off.
+//    2. Process death: SIGTERM (e.g. `pkill -ix frost` over SSH), or power-off.
 //       Not an unlock — the app is gone; teardown just avoids leaving the
 //       cursor decoupled.
 //    3. The DEBUG auto-unlock timer, compiled out of release builds, so a
@@ -569,11 +569,11 @@ final class LockController: ObservableObject {
         NSWorkspace.shared.openApplication(
             at: Bundle.main.bundleURL,
             configuration: configuration
-        ) { _, error in
-            // The weak capture belongs to the Task, not the outer completion
-            // handler: capturing it out there makes `self` a captured var that
-            // the concurrently-executing Task body then reads, which is an error
-            // in the Swift 6 language mode.
+        ) { [weak self] _, error in
+            // The Task keeps its own weak capture. A Task body that reads the
+            // handler's captured `self` instead is a captured-var read from
+            // concurrently-executing code, which the Swift 6 language mode
+            // rejects.
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 guard error == nil else {
@@ -670,7 +670,7 @@ final class LockController: ObservableObject {
                     ? """
                       Another app turned on secure keyboard entry, so \
                       \(self.settings.unlockShortcut.displayString) may not reach Frost. \
-                      If it doesn't work, run `pkill -x frost` over SSH from another device.
+                      If it doesn't work, run `pkill -ix frost` over SSH from another device.
                       """
                     : nil
             }

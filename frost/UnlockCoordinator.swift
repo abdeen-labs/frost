@@ -184,7 +184,7 @@ final class UnlockCoordinator: UnlockAuthenticating {
                 return """
                     Touch ID is locked after too many failed attempts and \
                     cannot recover while input is locked. From another device, \
-                    run `pkill -x frost` over SSH (Remote Login must already \
+                    run `pkill -ix frost` over SSH (Remote Login must already \
                     be on), or press and hold the power button to shut down \
                     this Mac.
                     """
@@ -193,7 +193,7 @@ final class UnlockCoordinator: UnlockAuthenticating {
                 Touch ID is not available right now. Press the unlock shortcut \
                 to try again. If Touch ID remains unavailable, use Remote Login \
                 from another device, or a terminal opened before locking, to run \
-                `pkill -x frost`.
+                `pkill -ix frost`.
                 """
         }
 

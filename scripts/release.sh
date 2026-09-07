@@ -94,7 +94,7 @@ if [ "$HEAD_SHA" != "$(git -C "$REPO_ROOT" rev-parse origin/main)" ]; then
   exit 1
 fi
 
-# Scope to the shipping app target's build configurations: frostTests carries
+# Scope to the shipping app target's build configurations: FrostTests carries
 # its own MARKETING_VERSION (1.0), so a project-wide grep reads the wrong one.
 # Match MARKETING_VERSION only inside a buildSettings block whose
 # PRODUCT_BUNDLE_IDENTIFIER is the release bundle id.
@@ -109,7 +109,7 @@ PROJECT_VERSION="$(awk '
     if (is_app && version != "") print version
     in_block = 0
   }
-' "$REPO_ROOT/frost.xcodeproj/project.pbxproj" | sort -u)"
+' "$REPO_ROOT/Frost.xcodeproj/project.pbxproj" | sort -u)"
 if [ "$(printf '%s\n' "$PROJECT_VERSION" | wc -l | tr -d ' ')" != "1" ] \
    || [ -z "$PROJECT_VERSION" ]; then
   echo "error: could not read a single MARKETING_VERSION for the release target" >&2

@@ -60,7 +60,7 @@ final class SystemHooks: SystemHooking {
 
             // Watchdog: the clean handler above runs on the main queue, and the
             // signal's default action was replaced with SIG_IGN — so if the main
-            // thread ever wedges while locked, `pkill -x frost` would otherwise
+            // thread ever wedges while locked, `pkill -ix frost` would otherwise
             // be silently ignored and the remote-kill contract would be dead.
             // If the process is still alive this long after the signal, the
             // clean path failed: restore the cursor association (best effort,

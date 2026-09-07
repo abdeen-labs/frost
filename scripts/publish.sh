@@ -69,10 +69,12 @@ find_sparkle_bin() {
   fi
   local derived="$HOME/Library/Developer/Xcode/DerivedData"
   local hit
-  # Multiple frost-* DerivedData dirs can hold different Sparkle versions;
+  # Multiple Frost-* DerivedData dirs can hold different Sparkle versions;
   # prefer the most recently built one instead of whichever find lists first.
+  # -path is case-sensitive; the bracket covers dirs from before the project
+  # was renamed from frost to Frost.
   hit="$(/usr/bin/find "$derived" -type f \
-        -path "$derived/frost-*/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_appcast" 2>/dev/null \
+        -path "$derived/[Ff]rost-*/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_appcast" 2>/dev/null \
         -print0 | xargs -0 ls -t 2>/dev/null | head -n 1)"
   if [ -n "$hit" ]; then
     dirname "$hit"
@@ -85,7 +87,7 @@ SPARKLE_BIN="$(find_sparkle_bin || true)"
 if [ -z "${SPARKLE_BIN:-}" ] || [ ! -x "$SPARKLE_BIN/generate_appcast" ]; then
   echo "error: could not find Sparkle's generate_appcast." >&2
   echo "Set SPARKLE_BIN to the dir containing it, e.g.:" >&2
-  echo "  export SPARKLE_BIN=~/Library/Developer/Xcode/DerivedData/frost-*/SourcePackages/artifacts/sparkle/Sparkle/bin" >&2
+  echo "  export SPARKLE_BIN=~/Library/Developer/Xcode/DerivedData/Frost-*/SourcePackages/artifacts/sparkle/Sparkle/bin" >&2
   exit 1
 fi
 echo "Using Sparkle tools: $SPARKLE_BIN"

@@ -35,7 +35,7 @@ struct SettingsView: View {
             } header: {
                 Text("Unlock")
             } footer: {
-                Text("Required. Press this while locked to bring up Touch ID. Click the field (or focus it and press Space) and press a new combo to change it, or ⎋ to cancel. Shortcuts must include at least one of ⌃, ⌥, or ⌘. Turn on automatic start to show Touch ID as soon as a lock begins. Frost requires Touch ID — or, if enabled, a paired, unlocked Apple Watch (double-press its side button when prompted).\n\nEmergency exit: if Touch ID can't unlock, run `pkill -x frost` over SSH from another device. Turn on Remote Login in System Settings before you rely on Frost.")
+                Text("Required. Press this while locked to bring up Touch ID. Click the field (or focus it and press Space) and press a new combo to change it, or ⎋ to cancel. Shortcuts must include at least one of ⌃, ⌥, or ⌘. Turn on automatic start to show Touch ID as soon as a lock begins. Frost requires Touch ID — or, if enabled, a paired, unlocked Apple Watch (double-press its side button when prompted).\n\nEmergency exit: if Touch ID can't unlock, run `pkill -ix frost` over SSH from another device. Turn on Remote Login in System Settings before you rely on Frost.")
                     .foregroundStyle(.secondary)
             }
 

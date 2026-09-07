@@ -78,7 +78,7 @@ struct UnlockCoordinatorTests {
             Issue.record("biometryLockout did not map to .unavailable")
             return
         }
-        #expect(message.contains("pkill -x frost"))
+        #expect(message.contains("pkill -ix frost"))
         #expect(message.contains("power button"))
         #expect(!message.lowercased().contains("try again"))
     }

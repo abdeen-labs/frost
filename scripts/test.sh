@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# test.sh — build Frost and run the frostTests unit suite, exactly as CI does.
+# test.sh — build Frost and run the FrostTests unit suite, exactly as CI does.
 #
 # This is the repo's one-command verification. Code signing is disabled: the
 # suite is logic tests only and needs no signed, distributable artifact.
@@ -25,7 +25,7 @@ if [ -n "${RESULT_BUNDLE_PATH:-}" ]; then
 fi
 
 xcodebuild test \
-  -project "$REPO_ROOT/frost.xcodeproj" \
+  -project "$REPO_ROOT/Frost.xcodeproj" \
   -scheme frost \
   -destination 'platform=macOS' \
   "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}" \

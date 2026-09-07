@@ -58,7 +58,7 @@ jobs:
           set -euxo pipefail
 
           xcodebuild build \
-            -project frost.xcodeproj \
+            -project Frost.xcodeproj \
             -scheme frost \
             -configuration Release \
             -destination 'platform=macOS' \

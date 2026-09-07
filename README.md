@@ -72,7 +72,7 @@ Enable **Remote Login** on your Mac *before* locking, then connect from the
 other device and run:
 
 ```sh
-pkill -x frost
+pkill -ix frost
 ```
 
 This quits Frost and restores input. If remote recovery isn't available and

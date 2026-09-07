@@ -249,7 +249,7 @@ final class EventTapManager: InputSuppressing {
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
             queue: .main
-        ) { _ in
+        ) { [weak self] _ in
             Task { @MainActor [weak self] in self?.reseatCursorPin() }
         }
     }
