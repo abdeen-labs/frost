@@ -14,9 +14,9 @@
 # Hosting model: the DMG lives on GitHub Releases (the appcast's <enclosure url>
 # points back at that asset). The appcast is a static file in the abdeen.dev
 # repo at public/frost/appcast.xml, served by Vercel at
-# https://abdeen.dev/frost/appcast.xml (the SUFeedURL). Builds up to 2.2 poll
-# the same file through the updates.abdeen.dev alias; keep that alias resolving
-# until they have migrated (see RELEASING.md). The download PAGE also lives in
+# https://abdeen.dev/frost/appcast.xml (the SUFeedURL). Builds up to 2.2
+# polled the retired updates.abdeen.dev alias and no longer see updates (see
+# RELEASING.md). The download PAGE also lives in
 # the abdeen.dev repo (src/app/frost), reads GitHub at load time, and ships with
 # the site — it is not touched here.
 #

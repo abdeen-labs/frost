@@ -22,12 +22,9 @@ the DMG is never uploaded to your domain. The download page doesn't change per
 release.
 
 Builds up to 2.2 shipped with `SUFeedURL` pointing at
-`updates.abdeen.dev/frost/appcast.xml`, a domain alias of the same Vercel project
-serving the same file; 2.2.1 moved the feed to the apex domain. An install only
-learns the new address by updating to 2.2.1 or later *through the old one*, so
-keep the alias resolving (or 301 it to the apex URL) until the installs you care
-about have moved. Once it is gone, anything still on 2.2 or older has to be
-reinstalled by hand from the download page.
+`updates.abdeen.dev/frost/appcast.xml`; 2.2.1 moved the feed to the apex domain.
+That alias is retired, so anything still on 2.2 or older no longer sees updates
+and has to be reinstalled by hand from the download page.
 
 ## One-time setup
 

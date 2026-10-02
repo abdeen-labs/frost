@@ -208,8 +208,8 @@ The current feed URL is:
 https://abdeen.dev/frost/appcast.xml
 ```
 
-Builds up to 2.2 read the same file through the `updates.abdeen.dev` alias;
-`RELEASING.md` covers keeping that alias alive until they have migrated.
+Builds up to 2.2 polled the retired `updates.abdeen.dev` alias, so those
+installs no longer see updates; `RELEASING.md` covers it.
 
 Do not replace `SUPublicEDKey`. It is the public EdDSA key used to verify
 updates for existing installs.
