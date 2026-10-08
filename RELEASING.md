@@ -68,10 +68,10 @@ and has to be reinstalled by hand from the download page.
    GitHub release, and commits + pushes the appcast to the abdeen.dev repo so
    Vercel deploys it):
    ```sh
-   ABDEEN_DEV_REPO=~/Developer/abdeen-labs/abdeen.dev scripts/release.sh /path/to/frost.app
+   ABDEEN_DEV_REPO=~/Developer/abdeen/labs/abdeen.dev scripts/release.sh /path/to/frost.app
    ```
-   `ABDEEN_DEV_REPO` defaults to `../abdeen.dev` (a sibling checkout), so you can
-   omit it only if the repos sit side by side. Add `DEPLOY=0` to build + create
+   `ABDEEN_DEV_REPO` defaults to `../abdeen/labs/abdeen.dev` (relative to this
+   repo), so you can omit it when the checkouts sit in that layout. Add `DEPLOY=0` to build + create
    the release but only write the appcast into the repo (no commit/push).
 
    The script is not resumable: if it fails after `gh release create`, do the

@@ -25,8 +25,8 @@
 #   DEPLOY=0 scripts/release.sh /path/to/frost.app        # build + release, stage appcast only
 #
 # Environment:
-#   ABDEEN_DEV_REPO   Path to the abdeen.dev working copy (default: sibling of
-#                     this repo, ../abdeen.dev).
+#   ABDEEN_DEV_REPO   Path to the abdeen.dev working copy (default:
+#                     ../abdeen/labs/abdeen.dev, relative to this repo).
 #
 # Prereqs: gh (authenticated), the Sparkle tools publish.sh discovers, and a
 # clean abdeen.dev checkout with push access (Vercel deploys on push).
@@ -46,7 +46,7 @@ fi
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_SLUG="${REPO_SLUG:-abdeen-labs/frost}"
 APP_PATH="${APP_PATH:-${1:-$REPO_ROOT/build/export/frost.app}}"
-SITE_REPO="${ABDEEN_DEV_REPO:-$REPO_ROOT/../abdeen.dev}"
+SITE_REPO="${ABDEEN_DEV_REPO:-$REPO_ROOT/../abdeen/labs/abdeen.dev}"
 
 if [ ! -d "$APP_PATH" ]; then
   echo "error: notarized frost.app not found at: $APP_PATH" >&2
