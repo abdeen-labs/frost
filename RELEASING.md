@@ -13,18 +13,23 @@ Two independent trust layers ship a release. Don't conflate them:
 | Artifact | Host |
 |---|---|
 | `Frost-x.y.z.dmg` (notarized) | GitHub Releases (`github.com/abdeen-labs/frost`) |
-| `appcast.xml` (EdDSA-signed) | `public/frost/appcast.xml` in the **abdeen.dev repo**, served at `abdeen.dev/frost/appcast.xml` |
-| Download page | `abdeen.dev/frost` — also in the abdeen.dev repo (`src/app/frost`), reads the latest release from GitHub at load time |
+| `appcast.xml` (EdDSA-signed) | Object `frost/appcast.xml` in a private S3-compatible bucket, served at `updates.abdeen.industries/frost/appcast.xml` |
+| Download page | `abdeen.dev/frost` — in the abdeen.dev repo (`src/app/frost`), reads the latest release from GitHub at load time |
 
-The appcast is just a static file in the abdeen.dev Vercel project and ships when
-the site deploys. The appcast's `<enclosure url>` points back at the GitHub DMG —
-the DMG is never uploaded to your domain. The download page doesn't change per
-release.
+The update host is a small service that answers every `GET /<app>/<file>` with a
+short-lived redirect to the bucket object `<app>/<file>`. Publishing is one
+upload of `frost/appcast.xml`; the service never redeploys per release. The
+appcast's `<enclosure url>` points back at the GitHub DMG — the DMG is never
+uploaded to the bucket. Enclosure URLs must stay absolute: Sparkle resolves a
+relative one against the redirected bucket URL, which would break it. The
+download page doesn't change per release.
 
-Builds up to 2.2 shipped with `SUFeedURL` pointing at
-`updates.abdeen.dev/frost/appcast.xml`; 2.2.1 moved the feed to the apex domain.
-That alias is retired, so anything still on 2.2 or older no longer sees updates
-and has to be reinstalled by hand from the download page.
+2.2.1 and 2.2.2 shipped with `SUFeedURL` pointing at
+`abdeen.dev/frost/appcast.xml`, which permanently redirects to the update host,
+so they keep receiving updates. Builds up to 2.2 shipped with `SUFeedURL`
+pointing at `updates.abdeen.dev/frost/appcast.xml`. That alias is retired, so
+anything still on 2.2 or older no longer sees updates and has to be reinstalled
+by hand from the download page.
 
 ## One-time setup
 
@@ -37,13 +42,23 @@ and has to be reinstalled by hand from the download page.
    updates for every installed copy. (`publish.sh` also enforces this match
    automatically before signing, along with `stapler validate` and a
    Gatekeeper `spctl` assessment of the exported app.)
-4. **`gh auth login`**, and a checkout of **`github.com/abdeen-labs/abdeen.dev`**
-   with push access (the release script commits the appcast there; Vercel
-   deploys on push).
-5. **Appcast route**: `public/frost/appcast.xml` in the abdeen.dev repo is served
-   at `abdeen.dev/frost/appcast.xml` (`SUFeedURL`) as a plain static file. Vercel's
-   default `application/xml` content type is fine for Sparkle. There is nothing to
-   configure beyond the site itself.
+4. **`gh auth login`**, and the bucket credentials in the environment you
+   release from. Copy the five values from the bucket's Credentials tab:
+   ```sh
+   export UPDATES_BUCKET=…             # BUCKET
+   export UPDATES_ACCESS_KEY_ID=…      # ACCESS_KEY_ID
+   export UPDATES_SECRET_ACCESS_KEY=…  # SECRET_ACCESS_KEY
+   export UPDATES_ENDPOINT=…           # ENDPOINT
+   export UPDATES_REGION=…             # REGION
+   ```
+   `release.sh` falls back to `https://t3.storageapi.dev` and `auto` for the last
+   two, but the manual upload below uses all five.
+   No other checkout is needed; the release script uploads the appcast itself.
+5. **Appcast route**: `updates.abdeen.industries/frost/appcast.xml` (`SUFeedURL`)
+   redirects to the bucket object `frost/appcast.xml`. The key is the URL path,
+   so there is nothing to configure per app. The upload sets
+   `Content-Type: application/xml` and `Cache-Control: no-cache`, so clients
+   revalidate instead of reusing a stale appcast.
 6. **Download page**: the `abdeen.dev/frost` route (`src/app/frost`). It reads the
    latest release from GitHub, so it doesn't need redeploying per version — it
    ships with the abdeen.dev site.
@@ -65,18 +80,30 @@ and has to be reinstalled by hand from the download page.
 4. **Archive → Distribute → Developer ID** in Xcode: sign, notarize, staple,
    export `frost.app`.
 5. **Run the release script** (builds the DMG, signs the appcast, creates the
-   GitHub release, and commits + pushes the appcast to the abdeen.dev repo so
-   Vercel deploys it):
+   GitHub release, and uploads the appcast to the update host), with the
+   `UPDATES_*` variables from setup step 4 exported:
    ```sh
-   ABDEEN_DEV_REPO=~/Developer/abdeen/labs/abdeen.dev scripts/release.sh /path/to/frost.app
+   scripts/release.sh /path/to/frost.app
    ```
-   `ABDEEN_DEV_REPO` defaults to `../abdeen/labs/abdeen.dev` (relative to this
-   repo), so you can omit it when the checkouts sit in that layout. Add `DEPLOY=0` to build + create
-   the release but only write the appcast into the repo (no commit/push).
+   It checks for the bucket credentials before building anything, so a missing
+   one never leaves a release half-cut. Add `UPLOAD=0` to build + create the
+   release but leave the signed appcast in `dist/appcast.xml` without uploading
+   it.
 
-   The script is not resumable: if it fails after `gh release create`, do the
-   last step by hand — copy `dist/appcast.xml` to `public/frost/appcast.xml` in
-   the site checkout, commit only that file, and push `main`.
+   The script is not resumable: if it fails after `gh release create`, re-run
+   only the upload, then confirm the feed serves the new appcast:
+   ```sh
+   printf 'user = "%s:%s"\n' "$UPDATES_ACCESS_KEY_ID" "$UPDATES_SECRET_ACCESS_KEY" |
+     curl --config - --fail-with-body --silent --show-error \
+       --aws-sigv4 "aws:amz:$UPDATES_REGION:s3" \
+       --header "Content-Type: application/xml" \
+       --header "Cache-Control: no-cache" \
+       --upload-file dist/appcast.xml \
+       "https://$UPDATES_BUCKET.${UPDATES_ENDPOINT#https://}/frost/appcast.xml"
+   curl -sSL https://updates.abdeen.industries/frost/appcast.xml
+   ```
+   The key pair goes to curl on stdin rather than as `--user`, so the secret
+   stays out of `ps`.
 6. **Verify**: open the GitHub release, confirm the `.dmg` downloads and opens
    without a Gatekeeper warning, then confirm an older build sees the update via
    *Check for Updates…* — and that the update dialog now shows the release notes
@@ -84,12 +111,14 @@ and has to be reinstalled by hand from the download page.
 
 ## What `release.sh` does
 
-Tag is `v$MARKETING_VERSION`. It refuses to overwrite an existing release. It sets
+Tag is `v$MARKETING_VERSION`. It refuses to overwrite an existing release, and
+refuses to start without the bucket credentials unless `UPLOAD=0`. It sets
 `DOWNLOAD_URL_PREFIX` to the GitHub asset URL and calls `publish.sh` (DMG +
-`generate_appcast`), then `gh release create … <dmg>`, then copies the appcast to
-`<abdeen.dev>/public/frost/appcast.xml` and commits + pushes **only that file**
-(a pathspec commit, so unrelated working changes are never swept in). Apple and
-Sparkle private keys stay in your Keychain the whole time.
+`generate_appcast`), then `gh release create … <dmg>`, then PUTs the appcast to
+the bucket as `frost/appcast.xml` (curl signs the request with SigV4) and reads
+it back through `updates.abdeen.industries`, reporting success only once the
+public feed serves exactly that file. Apple and Sparkle private keys stay in
+your Keychain the whole time.
 
 Release notes for **both** the GitHub release and the appcast's `<description>`
 come from the matching `CHANGELOG.md` section, extracted by `scripts/changelog.sh`:

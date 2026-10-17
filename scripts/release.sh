@@ -8,28 +8,34 @@
 #   1. Build the DMG and EdDSA-sign the Sparkle appcast (private key read from
 #      your login Keychain — it never leaves this machine).
 #   2. Create the GitHub Release for tag v<version> and upload the DMG.
-#   3. Publish the signed appcast by committing it to the abdeen.dev repo and
-#      pushing — Vercel then deploys it.
+#   3. Publish the signed appcast by uploading it to the update bucket, then
+#      read it back through the public feed URL.
 #
 # Hosting model: the DMG lives on GitHub Releases (the appcast's <enclosure url>
-# points back at that asset). The appcast is a static file in the abdeen.dev
-# repo at public/frost/appcast.xml, served by Vercel at
-# https://abdeen.dev/frost/appcast.xml (the SUFeedURL). Builds up to 2.2
-# polled the retired updates.abdeen.dev alias and no longer see updates (see
-# RELEASING.md). The download PAGE also lives in
-# the abdeen.dev repo (src/app/frost), reads GitHub at load time, and ships with
-# the site — it is not touched here.
+# points back at that asset). The appcast is the object frost/appcast.xml in a
+# private S3-compatible bucket. The SUFeedURL,
+# https://updates.abdeen.industries/frost/appcast.xml, is a small service that
+# answers with a short-lived redirect to that object, so publishing is a single
+# PUT and nothing redeploys per release. Builds 2.2.1–2.2.2 poll
+# abdeen.dev/frost/appcast.xml, which permanently redirects here; builds up to
+# 2.2 polled the retired updates.abdeen.dev alias and no longer see updates
+# (see RELEASING.md). The download PAGE lives in the
+# abdeen.dev site, reads GitHub at load time, and is not touched here.
 #
 # Usage:
-#   scripts/release.sh /path/to/frost.app                 # build, release, publish
-#   DEPLOY=0 scripts/release.sh /path/to/frost.app        # build + release, stage appcast only
+#   scripts/release.sh /path/to/frost.app                 # build, release, upload
+#   UPLOAD=0 scripts/release.sh /path/to/frost.app        # build + release, leave appcast in dist/
 #
-# Environment:
-#   ABDEEN_DEV_REPO   Path to the abdeen.dev working copy (default:
-#                     ../abdeen/labs/abdeen.dev, relative to this repo).
+# Environment (values from the bucket's Credentials tab; the first three are
+# required unless UPLOAD=0):
+#   UPDATES_BUCKET              Bucket name.
+#   UPDATES_ACCESS_KEY_ID       Access key id with write access to the bucket.
+#   UPDATES_SECRET_ACCESS_KEY   Its secret access key.
+#   UPDATES_ENDPOINT            Endpoint (default: https://t3.storageapi.dev).
+#   UPDATES_REGION              SigV4 signing region (default: auto).
 #
-# Prereqs: gh (authenticated), the Sparkle tools publish.sh discovers, and a
-# clean abdeen.dev checkout with push access (Vercel deploys on push).
+# Prereqs: gh (authenticated), the Sparkle tools publish.sh discovers, and
+# curl 7.76 or later for --aws-sigv4 and --fail-with-body (macOS ships one).
 
 set -euo pipefail
 
@@ -46,7 +52,6 @@ fi
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_SLUG="${REPO_SLUG:-abdeen-labs/frost}"
 APP_PATH="${APP_PATH:-${1:-$REPO_ROOT/build/export/frost.app}}"
-SITE_REPO="${ABDEEN_DEV_REPO:-$REPO_ROOT/../abdeen/labs/abdeen.dev}"
 
 if [ ! -d "$APP_PATH" ]; then
   echo "error: notarized frost.app not found at: $APP_PATH" >&2
@@ -122,6 +127,25 @@ if [ "$PROJECT_VERSION" != "$VERSION" ]; then
   exit 1
 fi
 
+# --- Upload credentials -----------------------------------------------------
+# Checked before anything is built or released: a credential found missing only
+# at step 3 would leave a published GitHub release whose appcast never went out,
+# so no installed copy would ever be offered it.
+if [ "${UPLOAD:-1}" = "1" ]; then
+  MISSING=""
+  for var in UPDATES_BUCKET UPDATES_ACCESS_KEY_ID UPDATES_SECRET_ACCESS_KEY; do
+    if [ -z "${!var:-}" ]; then
+      MISSING="$MISSING $var"
+    fi
+  done
+  if [ -n "$MISSING" ]; then
+    echo "error: not set:$MISSING" >&2
+    echo "Export the bucket credentials (see RELEASING.md), or run with UPLOAD=0" >&2
+    echo "to build and release without uploading the appcast." >&2
+    exit 1
+  fi
+fi
+
 # --- 1. DMG + signed appcast pointing at the GitHub asset -------------------
 export DOWNLOAD_URL_PREFIX="https://github.com/$REPO_SLUG/releases/download/$TAG/"
 "$REPO_ROOT/scripts/publish.sh" "$APP_PATH"
@@ -149,55 +173,49 @@ else
     --generate-notes
 fi
 
-# --- 3. Publish the appcast via the abdeen.dev site -------------------------
-# The appcast is a static file in the abdeen.dev repo, served by Vercel. Copy it
-# in, then commit + push only that file (a pathspec commit, so unrelated working
-# changes are never swept in).
-if [ ! -d "$SITE_REPO/.git" ]; then
-  echo "error: abdeen.dev repo not found at: $SITE_REPO" >&2
-  echo "Set ABDEEN_DEV_REPO to its path, or copy dist/appcast.xml to" >&2
-  echo "<abdeen.dev>/public/frost/appcast.xml and deploy the site yourself." >&2
-  exit 1
-fi
-
-DEST_REL="public/frost/appcast.xml"
-DEST="$SITE_REPO/$DEST_REL"
-mkdir -p "$(dirname "$DEST")"
-cp "$APPCAST" "$DEST"
-echo "Updated $DEST"
-
-if [ "${DEPLOY:-1}" = "1" ]; then
-  if [ -z "$(git -C "$SITE_REPO" status --porcelain -- "$DEST_REL")" ]; then
-    echo "Appcast unchanged in the site repo — nothing to deploy."
-  else
-    # The commit is pathspec-scoped, but a bare `git push` is not: any other
-    # unpushed local commits in the site checkout would deploy alongside the
-    # appcast (Vercel deploys on push). Assert we are on the deploy branch with
-    # nothing else pending, then push that branch explicitly.
-    SITE_BRANCH="$(git -C "$SITE_REPO" rev-parse --abbrev-ref HEAD)"
-    if [ "$SITE_BRANCH" != "main" ]; then
-      echo "error: $SITE_REPO is on '$SITE_BRANCH', not main. Switch to the" >&2
-      echo "deploy branch before publishing the appcast." >&2
-      exit 1
-    fi
-    if [ -n "$(git -C "$SITE_REPO" log --oneline '@{u}..' 2>/dev/null)" ]; then
-      echo "error: $SITE_REPO has unpushed commits. Pushing now would deploy" >&2
-      echo "them with the appcast. Push or drop them first:" >&2
-      git -C "$SITE_REPO" log --oneline '@{u}..' >&2
-      exit 1
-    fi
-    git -C "$SITE_REPO" add -- "$DEST_REL"
-    git -C "$SITE_REPO" commit -m "frost: appcast for $VERSION" -- "$DEST_REL"
-    git -C "$SITE_REPO" push origin HEAD:main
-    echo "Pushed appcast to abdeen.dev — Vercel will deploy it."
+# --- 3. Publish the appcast to the update host ------------------------------
+# The appcast is one object in a private S3-compatible bucket. The update host
+# answers GET /frost/appcast.xml with a short-lived redirect to the object of
+# the same key, so publishing is a single PUT: nothing to commit, nothing to
+# redeploy. The bucket is addressed virtual-hosted style, the bucket name as a
+# subdomain of the endpoint.
+APPCAST_KEY="frost/appcast.xml"
+FEED_URL="https://updates.abdeen.industries/$APPCAST_KEY"
+if [ "${UPLOAD:-1}" = "1" ]; then
+  ENDPOINT_HOST="${UPDATES_ENDPOINT:-https://t3.storageapi.dev}"
+  ENDPOINT_HOST="${ENDPOINT_HOST#https://}"
+  ENDPOINT_HOST="${ENDPOINT_HOST%%/*}"
+  OBJECT_URL="https://$UPDATES_BUCKET.$ENDPOINT_HOST/$APPCAST_KEY"
+  echo "Uploading the appcast to $OBJECT_URL..."
+  # curl signs the PUT itself (SigV4). The key pair goes in as a config on
+  # stdin rather than --user, so the secret never shows up in `ps`. no-cache
+  # makes clients revalidate rather than reuse a stale appcast.
+  if ! printf 'user = "%s:%s"\n' "$UPDATES_ACCESS_KEY_ID" "$UPDATES_SECRET_ACCESS_KEY" |
+    curl --config - --fail-with-body --silent --show-error \
+      --aws-sigv4 "aws:amz:${UPDATES_REGION:-auto}:s3" \
+      --header "Content-Type: application/xml" \
+      --header "Cache-Control: no-cache" \
+      --upload-file "$APPCAST" \
+      "$OBJECT_URL"; then
+    echo "error: uploading the appcast failed (curl's error is above)." >&2
+    echo "The GitHub release exists; re-run only the upload (see RELEASING.md)." >&2
+    exit 1
   fi
+  # Read it back through the public feed URL (redirect + bucket), so the script
+  # only reports success once installed copies can see this appcast.
+  if ! curl --fail --silent --show-error --location "$FEED_URL" | cmp -s - "$APPCAST"; then
+    echo "error: $FEED_URL does not serve the appcast just uploaded." >&2
+    echo "The GitHub release exists; re-run only the upload (see RELEASING.md)." >&2
+    exit 1
+  fi
+  echo "Published $FEED_URL"
 else
-  echo "DEPLOY=0 — appcast written to $DEST but not committed/pushed."
+  echo "UPLOAD=0 — appcast left at $APPCAST, not uploaded."
 fi
 
 echo
 echo "Done."
 echo "  Release: https://github.com/$REPO_SLUG/releases/tag/$TAG"
-echo "  Appcast: https://abdeen.dev/frost/appcast.xml"
+echo "  Appcast: $FEED_URL"
 echo "  Verify:  open the release page, confirm the .dmg downloads, then check an"
 echo "           older build sees the update via Check for Updates..."

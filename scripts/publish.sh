@@ -101,7 +101,7 @@ echo "Packaging Frost $SHORT_VERSION (build $BUILD_VERSION)"
 # Where the appcast's <enclosure url> should point. release.sh exports this to
 # aim at the GitHub Releases asset for the tag it is about to create; the
 # default below resolves to the same place, because that is where DMGs actually
-# live (RELEASING.md: only the appcast is served from abdeen.dev). A
+# live (RELEASING.md: only the appcast is served from the update host). A
 # default pointing at the update host would mint items whose enclosure 404s.
 DOWNLOAD_URL_PREFIX="${DOWNLOAD_URL_PREFIX:-https://github.com/$REPO_SLUG/releases/download/v$SHORT_VERSION/}"
 

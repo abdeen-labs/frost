@@ -17,6 +17,10 @@ them for someone deciding whether to install the update.
      "## [x.y.z] - YYYY-MM-DD" heading just below, so the entries fall under it;
      then repoint the [Unreleased] link and add a compare-link at the bottom. -->
 
+### Changed
+
+- Frost now checks for updates at updates.abdeen.industries. The previous address redirects there, so 2.2.1 and 2.2.2 keep receiving updates and there is nothing you need to do.
+
 ## [2.2.2] - 2026-09-06
 
 ### Changed

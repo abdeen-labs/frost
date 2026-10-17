@@ -205,11 +205,13 @@ Sparkle reads:
 The current feed URL is:
 
 ```text
-https://abdeen.dev/frost/appcast.xml
+https://updates.abdeen.industries/frost/appcast.xml
 ```
 
-Builds up to 2.2 polled the retired `updates.abdeen.dev` alias, so those
-installs no longer see updates; `RELEASING.md` covers it.
+Builds 2.2.1 and 2.2.2 poll `abdeen.dev/frost/appcast.xml`, which permanently
+redirects to the current URL. Builds up to 2.2 polled the retired
+`updates.abdeen.dev` alias, so those installs no longer see updates;
+`RELEASING.md` covers it.
 
 Do not replace `SUPublicEDKey`. It is the public EdDSA key used to verify
 updates for existing installs.
@@ -300,11 +302,14 @@ from an already exported, signed, notarized, and stapled `frost.app`. See
 1. Builds `dist/Frost-<version>.dmg` and the EdDSA-signed `dist/appcast.xml`
    (via `scripts/publish.sh`).
 2. Creates the GitHub Release `v<version>` and uploads the DMG there.
-3. Commits the appcast to the abdeen.dev repo, which serves it at
-   `https://abdeen.dev/frost/appcast.xml`.
+3. Uploads the appcast to the update bucket as `frost/appcast.xml`, then reads
+   it back through `https://updates.abdeen.industries/frost/appcast.xml`, which
+   redirects to that object. This needs the `UPDATES_*` bucket credentials
+   unless `UPLOAD=0`.
 
 The DMG lives on GitHub Releases; only the appcast lives on the update
-domain. The appcast's enclosure URL points at the GitHub asset.
+host. The appcast's enclosure URL points at the GitHub asset and must stay
+absolute, because Sparkle would resolve a relative one against the bucket.
 
 `scripts/publish.sh` is the lower-level DMG/appcast builder that
 `release.sh` drives. Running it standalone is for dry runs and legacy
