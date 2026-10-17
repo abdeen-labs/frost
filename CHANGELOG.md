@@ -19,7 +19,7 @@ them for someone deciding whether to install the update.
 
 ### Changed
 
-- Frost now checks for updates at updates.abdeen.industries. The previous address redirects there, so 2.2.1 and 2.2.2 keep receiving updates and there is nothing you need to do.
+- Updated the Sparkle update link.
 
 ## [2.2.2] - 2026-09-06
 
