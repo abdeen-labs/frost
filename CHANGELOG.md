@@ -17,6 +17,8 @@ them for someone deciding whether to install the update.
      "## [x.y.z] - YYYY-MM-DD" heading just below, so the entries fall under it;
      then repoint the [Unreleased] link and add a compare-link at the bottom. -->
 
+## [2.2.3] - 2026-10-16
+
 ### Changed
 
 - Updated the Sparkle update link.
@@ -171,7 +173,8 @@ Initial public release.
 - Pointer stays pinned while the screen is locked.
 - Sparkle-based automatic updates.
 
-[Unreleased]: https://github.com/abdeen-labs/frost/compare/v2.2.2...HEAD
+[Unreleased]: https://github.com/abdeen-labs/frost/compare/v2.2.3...HEAD
+[2.2.3]: https://github.com/abdeen-labs/frost/compare/v2.2.2...v2.2.3
 [2.2.2]: https://github.com/abdeen-labs/frost/compare/v2.2.1...v2.2.2
 [2.2.1]: https://github.com/abdeen-labs/frost/compare/v2.2...v2.2.1
 [2.2]: https://github.com/abdeen-labs/frost/compare/v2.1.2...v2.2
