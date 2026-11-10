@@ -10,6 +10,8 @@
 #   2. Create the GitHub Release for tag v<version> and upload the DMG.
 #   3. Publish the signed appcast by uploading it to the update bucket, then
 #      read it back through the public feed URL.
+#   4. Set the Homebrew cask (Casks/frost.rb in abdeen-labs/homebrew-tap) to
+#      this version and the DMG's SHA-256, and push the tap.
 #
 # Hosting model: the DMG lives on GitHub Releases (the appcast's <enclosure url>
 # points back at that asset). The appcast is the object frost/appcast.xml in a
@@ -33,6 +35,9 @@
 #   UPDATES_SECRET_ACCESS_KEY   Its secret access key.
 #   UPDATES_ENDPOINT            Endpoint (default: https://t3.storageapi.dev).
 #   UPDATES_REGION              SigV4 signing region (default: auto).
+#   TAP_REMOTE                  The Homebrew tap holding Casks/frost.rb
+#                               (default: git@github.com:abdeen-labs/homebrew-tap.git).
+#                               Pushed to only when the appcast is uploaded.
 #
 # Prereqs: gh (authenticated), the Sparkle tools publish.sh discovers, and
 # curl 7.76 or later for --aws-sigv4 and --fail-with-body (macOS ships one).
@@ -52,6 +57,7 @@ fi
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_SLUG="${REPO_SLUG:-abdeen-labs/frost}"
 APP_PATH="${APP_PATH:-${1:-$REPO_ROOT/build/export/frost.app}}"
+TAP_REMOTE="${TAP_REMOTE:-git@github.com:abdeen-labs/homebrew-tap.git}"
 
 if [ ! -d "$APP_PATH" ]; then
   echo "error: notarized frost.app not found at: $APP_PATH" >&2
@@ -144,6 +150,13 @@ if [ "${UPLOAD:-1}" = "1" ]; then
     echo "to build and release without uploading the appcast." >&2
     exit 1
   fi
+  # The cask is pushed last; an unreachable tap found only then would leave the
+  # release out but Homebrew installing the previous version.
+  if ! git ls-remote --exit-code "$TAP_REMOTE" HEAD >/dev/null; then
+    echo "error: can't reach the Homebrew tap at $TAP_REMOTE, which the release" >&2
+    echo "pushes the cask to. Check SSH access to it, or set TAP_REMOTE." >&2
+    exit 1
+  fi
 fi
 
 # --- 1. DMG + signed appcast pointing at the GitHub asset -------------------
@@ -213,9 +226,48 @@ else
   echo "UPLOAD=0 — appcast left at $APPCAST, not uploaded."
 fi
 
+# --- 4. Homebrew cask -------------------------------------------------------
+# The cask names the GitHub DMG by version and pins its SHA-256, so new
+# installs through Homebrew start on this release. It moves only once the
+# appcast is out, so Homebrew and Sparkle agree on the newest version.
+if [ "${UPLOAD:-1}" = "1" ]; then
+  TAP_DIR="$(mktemp -d)"
+  trap 'rm -f "$NOTES_FILE"; rm -rf "$TAP_DIR"' EXIT
+  CASK_FAILED="error: the release and appcast are out, but the Homebrew cask wasn't
+updated. Set version \"$VERSION\" and its sha256 in Casks/frost.rb in $TAP_REMOTE by hand."
+  if ! git clone --quiet --depth 1 "$TAP_REMOTE" "$TAP_DIR/tap"; then
+    echo "$CASK_FAILED" >&2
+    exit 1
+  fi
+  CASK="$TAP_DIR/tap/Casks/frost.rb"
+  SHA256="$(shasum -a 256 "$DMG" | cut -d ' ' -f 1)"
+  if [ ! -f "$CASK" ]; then
+    echo "$CASK_FAILED" >&2
+    exit 1
+  fi
+  sed -i '' -E \
+    -e "s/^(  version )\"[^\"]*\"\$/\\1\"$VERSION\"/" \
+    -e "s/^(  sha256 )\"[^\"]*\"\$/\\1\"$SHA256\"/" \
+    "$CASK"
+  if ! grep -qx "  version \"$VERSION\"" "$CASK" || ! grep -qx "  sha256 \"$SHA256\"" "$CASK"; then
+    echo "$CASK_FAILED" >&2
+    exit 1
+  fi
+  if git -C "$TAP_DIR/tap" diff --quiet; then
+    echo "The Homebrew cask is already at $VERSION."
+  elif ! git -C "$TAP_DIR/tap" commit --quiet --all --message "Frost $VERSION" ||
+    ! git -C "$TAP_DIR/tap" push --quiet origin HEAD; then
+    echo "$CASK_FAILED" >&2
+    exit 1
+  else
+    echo "Updated the Homebrew cask to $VERSION."
+  fi
+fi
+
 echo
 echo "Done."
 echo "  Release: https://github.com/$REPO_SLUG/releases/tag/$TAG"
 echo "  Appcast: $FEED_URL"
+echo "  Brew:    brew install --cask abdeen-labs/tap/frost"
 echo "  Verify:  open the release page, confirm the .dmg downloads, then check an"
 echo "           older build sees the update via Check for Updates..."

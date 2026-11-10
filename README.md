@@ -17,7 +17,8 @@ use a paired, unlocked Apple Watch by enabling **Allow Apple Watch to unlock**
 in Frost's settings.
 
 1. Download Frost from [GitHub Releases](https://github.com/abdeen-labs/frost/releases),
-   open the disk image, and drag Frost to Applications.
+   open the disk image, and drag Frost to Applications. Or install it with
+   Homebrew: `brew install --cask abdeen-labs/tap/frost`.
 2. Open Frost. It appears in the menu bar, with no Dock icon.
 3. Grant Frost **Accessibility** access in **System Settings → Privacy & Security
    → Accessibility** when prompted.

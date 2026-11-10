@@ -15,6 +15,7 @@ Two independent trust layers ship a release. Don't conflate them:
 | `Frost-x.y.z.dmg` (notarized) | GitHub Releases (`github.com/abdeen-labs/frost`) |
 | `appcast.xml` (EdDSA-signed) | Object `frost/appcast.xml` in a private S3-compatible bucket, served at `updates.abdeen.industries/frost/appcast.xml` |
 | Download page | `abdeen.dev/frost` — in the abdeen.dev repo (`src/app/frost`), reads the latest release from GitHub at load time |
+| Homebrew cask | `Casks/frost.rb` in `github.com/abdeen-labs/homebrew-tap` (`brew install --cask abdeen-labs/tap/frost`); pins the version and the GitHub DMG's SHA-256 |
 
 The update host is a small service that answers every `GET /<app>/<file>` with a
 short-lived redirect to the bucket object `<app>/<file>`. Publishing is one
@@ -62,6 +63,8 @@ by hand from the download page.
 6. **Download page**: the `abdeen.dev/frost` route (`src/app/frost`). It reads the
    latest release from GitHub, so it doesn't need redeploying per version — it
    ships with the abdeen.dev site.
+7. **Push access to the tap** over SSH:
+   `git@github.com:abdeen-labs/homebrew-tap.git`.
 
 ## Cutting a release
 
@@ -117,8 +120,12 @@ refuses to start without the bucket credentials unless `UPLOAD=0`. It sets
 `generate_appcast`), then `gh release create … <dmg>`, then PUTs the appcast to
 the bucket as `frost/appcast.xml` (curl signs the request with SigV4) and reads
 it back through `updates.abdeen.industries`, reporting success only once the
-public feed serves exactly that file. Apple and Sparkle private keys stay in
-your Keychain the whole time.
+public feed serves exactly that file. Last, it sets `version` and `sha256` in
+the tap's `Casks/frost.rb` and pushes the tap; with `UPLOAD=0` the cask is left
+alone. It checks that the tap is reachable before building anything. If the
+cask step fails, the release and appcast are already out: set the two lines in
+the cask by hand. Apple and Sparkle private keys stay in your Keychain the
+whole time.
 
 Release notes for **both** the GitHub release and the appcast's `<description>`
 come from the matching `CHANGELOG.md` section, extracted by `scripts/changelog.sh`:
